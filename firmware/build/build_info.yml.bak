@@ -1,5 +1,0 @@
-west:
-  command: /home/sidney-neil/csse4011/.venv/bin/west build -p -b xiao_ble/nrf52840/sense
-    -d firmware/prac5_task2/build firmware/prac5_task2
-  topdir: /home/sidney-neil/csse4011
-  version: 1.5.0
