@@ -1,129 +1,102 @@
-/*
- * Copyright (c) 2022 Nordic Semiconductor ASA
- * Copyright (c) 2015-2016 Intel Corporation
- *
- * SPDX-License-Identifier: Apache-2.0
- */
-
 #include <zephyr/sys/printk.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
-#include <zephyr/drivers/gpio.h>
-#include "string.h"
+#include <zephyr/bluetooth/gap.h>
+#include <string.h>
 
 #define NAME_LEN 30
 
-static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
-                         struct net_buf_simple *ad)
+static const bt_addr_le_t whitelist[] = {
+    {.type = BT_ADDR_LE_RANDOM, .a = {{0x67, 0x34, 0x85, 0xFE, 0x75, 0xF5}}},
+    {.type = BT_ADDR_LE_RANDOM, .a = {{0x86, 0x1E, 0x06, 0x87, 0x73, 0xE5}}},
+    {.type = BT_ADDR_LE_RANDOM, .a = {{0xB1, 0x98, 0xFD, 0x9E, 0x99, 0xCA}}},
+    {.type = BT_ADDR_LE_RANDOM, .a = {{0xFE, 0xFF, 0x82, 0x89, 0x1B, 0xCB}}},
+    {.type = BT_ADDR_LE_RANDOM, .a = {{0xAC, 0x5C, 0xA4, 0xA0, 0xD2, 0xD4}}},
+    {.type = BT_ADDR_LE_RANDOM, .a = {{0x7C, 0xB7, 0xE9, 0x27, 0x13, 0xC1}}},
+    {.type = BT_ADDR_LE_RANDOM, .a = {{0xA0, 0x39, 0x06, 0x48, 0x04, 0xF1}}},
+    {.type = BT_ADDR_LE_RANDOM, .a = {{0x60, 0xCE, 0xDB, 0xE0, 0x0C, 0xCA}}},
+    {.type = BT_ADDR_LE_RANDOM, .a = {{0x13, 0x20, 0x7C, 0xD4, 0x7F, 0xD4}}},
+    {.type = BT_ADDR_LE_RANDOM, .a = {{0xE1, 0xC8, 0xF1, 0x21, 0x0B, 0xF7}}},
+    {.type = BT_ADDR_LE_RANDOM, .a = {{0x4A, 0x3E, 0xFA, 0x8D, 0xE0, 0xFD}}},
+    {.type = BT_ADDR_LE_RANDOM, .a = {{0xAC, 0xFA, 0x28, 0xF7, 0x32, 0xEE}}},
+    {.type = BT_ADDR_LE_RANDOM, .a = {{0x2C, 0xD7, 0xA8, 0x46, 0x3B, 0xF7}}},
+};
+
+struct adv_context {
+    const bt_addr_le_t *addr;
+    char name[NAME_LEN];
+};
+
+static bool addr_match(const bt_addr_le_t *addr)
 {
-    char addr_str[BT_ADDR_LE_STR_LEN];
-
-    bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
-    // printk("Device found: %s (RSSI %d), type %u, AD data len %u\n",
-    //      addr_str, rssi, type, ad->len);
+    for (int i = 0; i < ARRAY_SIZE(whitelist); i++) {
+        if (bt_addr_le_cmp(addr, &whitelist[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
-
-#if defined(CONFIG_BT_EXT_ADV)
 
 static bool data_cb(struct bt_data *data, void *user_data)
 {
-    char *name = user_data;
-    uint8_t len;
-
-    char buffer[5];
-    sprintf(buffer, "%c%c%c%c\0", data->data[0], data->data[1], data->data[2], data->data[3]);
-
-    if (!strcmp(buffer, "4011")) {
-        printk("%c\n", data->data[5]);
-    }
+    struct adv_context *ctx = user_data;
 
     switch (data->type) {
     case BT_DATA_NAME_SHORTENED:
-    case BT_DATA_NAME_COMPLETE:
-        len = MIN(data->data_len, NAME_LEN - 1);
-        (void)memcpy(name, data->data, len);
-        name[len] = '\0';
+    case BT_DATA_NAME_COMPLETE: {
+        uint8_t len = MIN(data->data_len, NAME_LEN - 1);
+        memcpy(ctx->name, data->data, len);
+        ctx->name[len] = '\0';
         return false;
+    }
     default:
         return true;
     }
 }
 
-static const char *phy2str(uint8_t phy)
-{
-    switch (phy) {
-    case BT_GAP_LE_PHY_NONE:
-        return "No packets";
-    case BT_GAP_LE_PHY_1M:
-        return "LE 1M";
-    case BT_GAP_LE_PHY_2M:
-        return "LE 2M";
-    case BT_GAP_LE_PHY_CODED:
-        return "LE Coded";
-    default:
-        return "Unknown";
-    }
-}
-
 static void scan_recv(const struct bt_le_scan_recv_info *info, struct net_buf_simple *buf)
 {
-    char le_addr[BT_ADDR_LE_STR_LEN];
-    char name[NAME_LEN];
-    uint8_t data_status;
-    uint16_t data_len;
-
-    (void)memset(name, 0, sizeof(name));
-
-    data_len = buf->len;
-    bt_data_parse(buf, data_cb, name);
-
-    data_status = BT_HCI_LE_ADV_EVT_TYPE_DATA_STATUS(info->adv_props);
-
-    if (buf->len < 7) {
+    if (!addr_match(info->addr)) {
         return;
     }
 
-    if (buf->data[5] == 0x40 && buf->data[6] == 0x11) {
-        printk("\n\n\n\n SUCCESS \n\n\n\n\n");
+    char addr_str[BT_ADDR_LE_STR_LEN];
+    bt_addr_le_to_str(info->addr, addr_str, sizeof(addr_str));
+
+    struct adv_context ctx = {
+        .addr = info->addr,
+    };
+
+    memset(ctx.name, 0, sizeof(ctx.name));
+
+    bt_data_parse(buf, data_cb, &ctx);
+
+    if (ctx.name[0] != '\0') {
+        printk("Name: %s\n", ctx.name);
     }
-    // printk("Manufacturer ID: %x %x %x %x %x %x %x %x\n", (buf->data[0]), buf->data[1],
-    // (buf->data[2]), buf->data[3],  (buf->data[4]), buf->data[5],  (buf->data[6]), buf->data[7]);
-
-    // printk("Manufacturer ID: %x %x\n", (buf->data[0]), buf->data[1]);
-    // printk("Student ID: %x %x %x %x\n", buf->data[2], buf->data[3], buf->data[4], buf->data[5]);
-    // printk("CMD Type: %x\n", buf->data[6]);
-    // printk("CMD Arg: %x\n", buf->data[7]);
-
-    return;
 }
 
 static struct bt_le_scan_cb scan_callbacks = {
     .recv = scan_recv,
 };
-#endif /* CONFIG_BT_EXT_ADV */
 
 int observer_start(void)
 {
-    /* 30 ms continuous active scanning with duplicate filtering. */
     struct bt_le_scan_param scan_param = {
         .type = BT_LE_SCAN_TYPE_ACTIVE,
         .options = BT_LE_SCAN_OPT_FILTER_DUPLICATE,
         .interval = BT_GAP_SCAN_FAST_INTERVAL_MIN,
         .window = BT_GAP_SCAN_FAST_WINDOW,
     };
-    int err;
 
-#if defined(CONFIG_BT_EXT_ADV)
     bt_le_scan_cb_register(&scan_callbacks);
-    printk("Registered scan callbacks\n");
-#endif /* CONFIG_BT_EXT_ADV */
 
-    err = bt_le_scan_start(&scan_param, device_found);
+    int err = bt_le_scan_start(&scan_param, NULL);
     if (err) {
-        printk("Start scanning failed (err %d)\n", err);
+        printk("Scan start failed (err %d)\n", err);
         return err;
     }
-    printk("Started scanning...\n");
 
+    printk("Scanning started\n");
     return 0;
 }
