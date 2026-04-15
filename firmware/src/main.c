@@ -3,6 +3,7 @@
 #include <zephyr/kernel.h>
 
 #include "sensor.h"
+#include "comms.h"
 
 #define STACK_SIZE       2048
 #define SENSING_PRIORITY 5
