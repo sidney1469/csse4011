@@ -6,7 +6,7 @@
 
 #define NAME_LEN 30
 
-static const bt_addr_le_t whitelist[] = {
+static const bt_addr_le_t nodelist[] = {
     {.type = BT_ADDR_LE_RANDOM, .a = {{0x67, 0x34, 0x85, 0xFE, 0x75, 0xF5}}},
     {.type = BT_ADDR_LE_RANDOM, .a = {{0x86, 0x1E, 0x06, 0x87, 0x73, 0xE5}}},
     {.type = BT_ADDR_LE_RANDOM, .a = {{0xB1, 0x98, 0xFD, 0x9E, 0x99, 0xCA}}},
@@ -29,8 +29,8 @@ struct adv_context {
 
 static bool addr_match(const bt_addr_le_t *addr)
 {
-    for (int i = 0; i < ARRAY_SIZE(whitelist); i++) {
-        if (bt_addr_le_cmp(addr, &whitelist[i]) == 0) {
+    for (int i = 0; i < ARRAY_SIZE(nodelist); i++) {
+        if (bt_addr_le_cmp(addr, &nodelist[i]) == 0) {
             return true;
         }
     }
@@ -72,7 +72,7 @@ static void scan_recv(const struct bt_le_scan_recv_info *info, struct net_buf_si
     bt_data_parse(buf, data_cb, &ctx);
 
     if (ctx.name[0] != '\0') {
-        printk("Name: %s\n", ctx.name);
+        printk("Name: %s | RSSI: %d dBm\n", ctx.name, info->rssi);
     }
 }
 
