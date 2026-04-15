@@ -4,6 +4,8 @@
 #include <zephyr/bluetooth/gap.h>
 #include <string.h>
 
+#include "observer.h"
+
 #define NAME_LEN 30
 
 static const bt_addr_le_t nodelist[] = {
@@ -80,8 +82,14 @@ static struct bt_le_scan_cb scan_callbacks = {
     .recv = scan_recv,
 };
 
-int observer_start(void)
+void sensing_thread(void *a, void *b, void *c)
 {
+    int err = bt_enable(NULL);
+    if (err) {
+        printk("Bluetooth init failed (err %d)\n", err);
+        return 0;
+    }
+
     struct bt_le_scan_param scan_param = {
         .type = BT_LE_SCAN_TYPE_ACTIVE,
         .options = BT_LE_SCAN_OPT_FILTER_DUPLICATE,
@@ -91,12 +99,13 @@ int observer_start(void)
 
     bt_le_scan_cb_register(&scan_callbacks);
 
-    int err = bt_le_scan_start(&scan_param, NULL);
+    err = bt_le_scan_start(&scan_param, NULL);
     if (err) {
         printk("Scan start failed (err %d)\n", err);
         return err;
     }
 
-    printk("Scanning started\n");
-    return 0;
+    while (1) {
+        // keep thread alive
+    }
 }
