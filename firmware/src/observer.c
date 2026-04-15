@@ -9,6 +9,7 @@
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/drivers/gpio.h>
+#include "string.h"
 
 #define LED_RED_NODE   DT_ALIAS(led0)/* main.c - Application main entry point */
 #define LED_GREEN_NODE DT_ALIAS(led1)
@@ -95,27 +96,12 @@ static bool data_cb(struct bt_data *data, void *user_data)
 {
 	char *name = user_data;
 	uint8_t len;
+	
+	char buffer[5];
+	sprintf(buffer, "%c%c%c%c\0", data->data[0], data->data[1], data->data[2], data->data[3]);
 
-	if (data->data[0] == 0x40 && data->data[1]== 0x11) {
-		uint8_t manufacturer_id[2] = {data->data[0], data->data[1]};
-		uint8_t student_number[4] = {data->data[2], data->data[3], data->data[4], data->data[5]};
-		uint8_t cmd_type = data->data[6];
-		uint8_t cmd_arg = data->data[7];
-
-		printk("Manufacturer ID: %x %x\n", data->data[0], data->data[1]);
-		printk("Student Number: %x %x %x %x\n", student_number[0], student_number[1], student_number[2], student_number[3]);
-		printk("CMD Type: %x\n", cmd_type);
-		printk("CMD Arg: %x\n", cmd_arg);
-
-
-		switch (cmd_type) {
-			case 0x00:
-				handle_off();
-				break;
-			case 0x01:
-				handle_on(cmd_arg);
-				break;
-		}
+	if (!strcmp(buffer, "4011")) {
+		printk("%s\n", buffer);
 	}
 
 	switch (data->type) {
