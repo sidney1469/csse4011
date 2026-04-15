@@ -24,10 +24,12 @@ static const bt_addr_le_t nodelist[] = {
     {.type = BT_ADDR_LE_RANDOM, .a = {{0x2C, 0xD7, 0xA8, 0x46, 0x3B, 0xF7}}},
 };
 
-struct adv_context {
-    const bt_addr_le_t *addr;
-    char name[NAME_LEN];
+struct scan_result {
+    bt_addr_le_t addr;
+    int8_t rssi;
 };
+
+K_MSGQ_DEFINE(scan_msgq, sizeof(struct scan_result), 30, 4);
 
 static bool addr_match(const bt_addr_le_t *addr)
 {
@@ -39,43 +41,17 @@ static bool addr_match(const bt_addr_le_t *addr)
     return false;
 }
 
-static bool data_cb(struct bt_data *data, void *user_data)
-{
-    struct adv_context *ctx = user_data;
-
-    switch (data->type) {
-    case BT_DATA_NAME_SHORTENED:
-    case BT_DATA_NAME_COMPLETE: {
-        uint8_t len = MIN(data->data_len, NAME_LEN - 1);
-        memcpy(ctx->name, data->data, len);
-        ctx->name[len] = '\0';
-        return false;
-    }
-    default:
-        return true;
-    }
-}
-
 static void scan_recv(const struct bt_le_scan_recv_info *info, struct net_buf_simple *buf)
 {
     if (!addr_match(info->addr)) {
         return;
     }
 
-    char addr_str[BT_ADDR_LE_STR_LEN];
-    bt_addr_le_to_str(info->addr, addr_str, sizeof(addr_str));
+    struct scan_result result;
+    bt_addr_le_copy(&result.addr, info->addr);
+    result.rssi = info->rssi;
 
-    struct adv_context ctx = {
-        .addr = info->addr,
-    };
-
-    memset(ctx.name, 0, sizeof(ctx.name));
-
-    bt_data_parse(buf, data_cb, &ctx);
-
-    if (ctx.name[0] != '\0') {
-        printk("Name: %s | RSSI: %d dBm\n", ctx.name, info->rssi);
-    }
+    k_msgq_put(&scan_msgq, &result, K_NO_WAIT);
 }
 
 static struct bt_le_scan_cb scan_callbacks = {
@@ -84,11 +60,7 @@ static struct bt_le_scan_cb scan_callbacks = {
 
 void sensing_thread(void *a, void *b, void *c)
 {
-    int err = bt_enable(NULL);
-    if (err) {
-        printk("Bluetooth init failed (err %d)\n", err);
-        return 0;
-    }
+    bt_enable(NULL);
 
     struct bt_le_scan_param scan_param = {
         .type = BT_LE_SCAN_TYPE_ACTIVE,
@@ -99,13 +71,9 @@ void sensing_thread(void *a, void *b, void *c)
 
     bt_le_scan_cb_register(&scan_callbacks);
 
-    err = bt_le_scan_start(&scan_param, NULL);
-    if (err) {
-        printk("Scan start failed (err %d)\n", err);
-        return err;
-    }
+    bt_le_scan_start(&scan_param, NULL);
 
     while (1) {
-        // keep thread alive
+        k_sleep(K_FOREVER);
     }
 }
