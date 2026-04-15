@@ -6,5 +6,6 @@ project(observer)
 
 target_sources(app PRIVATE
   src/main.c
-  src/observer.c
+  src/sensor.c
+  src/comms.c
 )

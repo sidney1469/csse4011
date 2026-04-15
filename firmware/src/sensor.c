@@ -4,7 +4,7 @@
 #include <zephyr/bluetooth/gap.h>
 #include <string.h>
 
-#include "observer.h"
+#include "sensor.h"
 
 #define NAME_LEN 30
 

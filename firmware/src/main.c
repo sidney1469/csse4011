@@ -2,7 +2,7 @@
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/kernel.h>
 
-#include "observer.h"
+#include "sensor.h"
 
 #define STACK_SIZE       2048
 #define SENSING_PRIORITY 5
