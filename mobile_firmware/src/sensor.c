@@ -6,7 +6,8 @@
 
 #include "sensor.h"
 
-#define NAME_LEN 30
+#define NAME_LEN  30
+#define COUNT_MAX 30
 
 static const bt_addr_le_t nodelist[] = {
     {.type = BT_ADDR_LE_RANDOM, .a = {{0x67, 0x34, 0x85, 0xFE, 0x75, 0xF5}}},
@@ -29,7 +30,11 @@ struct scan_result {
     int8_t rssi;
 };
 
+struct k_msgq scan_msgq;
+struct k_msgq rssi_msgq;
+
 K_MSGQ_DEFINE(scan_msgq, sizeof(struct scan_result), 30, 4);
+K_MSGQ_DEFINE(rssi_msgq, 13 * sizeof(uint8_t), 1, 4);
 
 static bool addr_match(const bt_addr_le_t *addr)
 {
@@ -39,6 +44,16 @@ static bool addr_match(const bt_addr_le_t *addr)
         }
     }
     return false;
+}
+
+static int addr_index(const bt_addr_le_t *addr)
+{
+    for (int i = 0; i < ARRAY_SIZE(nodelist); i++) {
+        if (bt_addr_le_cmp(addr, &nodelist[i]) == 0) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 static void scan_recv(const struct bt_le_scan_recv_info *info, struct net_buf_simple *buf)
@@ -69,11 +84,34 @@ void sensing_thread(void *a, void *b, void *c)
         .window = BT_GAP_SCAN_FAST_WINDOW,
     };
 
+    struct scan_result result;
+
+    int8_t rssi_table[13] = {0};
+
     bt_le_scan_cb_register(&scan_callbacks);
 
     bt_le_scan_start(&scan_param, NULL);
 
+    int count = 0;
+
     while (1) {
-        k_sleep(K_FOREVER);
+        k_msgq_get(&scan_msgq, &result, K_FOREVER);
+        int i = addr_index(&result.addr);
+        if (i != -1) {
+            rssi_table[i] = result.rssi;
+        }
+        if (count <= COUNT_MAX) {
+
+            k_msgq_purge(&rssi_msgq);
+            k_msgq_put(&rssi_msgq, &rssi_table, K_NO_WAIT);
+
+            printk("Rssi table: ");
+            for (int i = 0; i < 13; i++) {
+                printk("%d ", rssi_table[i]);
+            }
+            printk("\n");
+
+            count = 0;
+        }
     }
 }

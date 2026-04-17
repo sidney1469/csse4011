@@ -3,4 +3,6 @@
 
 void sensing_thread(void *a, void *b, void *c);
 
+extern struct k_msgq rssi_msgq;
+
 #endif
