@@ -126,24 +126,20 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 
 
 
-K_THREAD_DEFINE(parse_thread_id, 1024, parse_thread, NULL, NULL, NULL, 7, 0, K_NO_WAIT);
-K_THREAD_DEFINE(central_thread_id, 1024, central_thread, NULL, NULL, NULL, 7, 0, K_NO_WAIT);
-K_THREAD_DEFINE(shell_thread_id, 1024, shell_thread, NULL, NULL, NULL, 7, 0, K_NO_WAIT);
+K_THREAD_DEFINE(my_thread_id, 1024, my_entry_function, NULL, NULL, NULL, 7, 0, K_NO_WAIT);
 
-
-
-int main(void)
+void central_thread(void)
 {
 	int err;
 
 	err = bt_enable(NULL);
 	if (err) {
 		printk("Bluetooth init failed (err %d)\n", err);
-		return 0;
+		return;
 	}
 
 	printk("Bluetooth initialized\n");
 
 	start_scan();
-	return 0;
+	return;
 }

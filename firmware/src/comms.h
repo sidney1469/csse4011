@@ -3,5 +3,6 @@
 
 int send_comms(char* string);
 int init_comms(void);
+void comms_thread(void);
 
 #endif

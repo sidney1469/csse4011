@@ -2,9 +2,11 @@
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/services/nus.h>
 #include "comms.h"
+#include "sensor.h"
 
 #define DEVICE_NAME		CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN		(sizeof(DEVICE_NAME) - 1)
+#define MESSAGE_WAIT_TIME 1
 
 int init_comms(void);
 int send_comms(char* string);
@@ -89,4 +91,13 @@ int send_comms(char* string) {
 	if (err < 0 && (err != -EAGAIN) && (err != -ENOTCONN)) {
 		return err;
 	}
+}
+
+void comms_thread(void) {
+	char message[13];
+    init_comms();
+    while(1) {
+        k_msgq_get(&my_msgq, &message, K_FOREVER);
+        send_coms(message);
+    }
 }
