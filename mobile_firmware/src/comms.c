@@ -8,6 +8,11 @@
 #define DEVICE_NAME_LEN		(sizeof(DEVICE_NAME) - 1)
 #define MESSAGE_WAIT_TIME 1
 
+char my_msgq_buffer[10 * sizeof(struct data_item_type)];
+struct k_msgq my_msgq;
+
+k_msgq_init(&my_msgq, my_msgq_buffer, sizeof(struct data_item_type), 10);
+
 int init_comms(void);
 int send_comms(char* string);
 
@@ -32,6 +37,11 @@ static void received(struct bt_conn *conn, const void *data, uint16_t len, void 
 	ARG_UNUSED(conn);
 	ARG_UNUSED(ctx);
 
+
+	while (k_msgq_put(&ibeacon_ll_queue, &data, K_NO_WAIT) != 0) {
+            /* message queue is full: purge old data & try again */
+            k_msgq_purge(&my_msgq);
+        }
 	printk("%s() - Len: %d, Message: %.*s\n", __func__, len, len, (char *)data);
 }
 
@@ -94,10 +104,10 @@ int send_comms(char* string) {
 }
 
 void comms_thread(void) {
-	char message[13];
+	uint8_t RSSI_ARRAY[13];
     init_comms();
     while(1) {
-        k_msgq_get(&my_msgq, &message, K_FOREVER);
-        send_coms(message);
+        k_msgq_get(&rssi_msgq, &RSSI_ARRAY, K_FOREVER);
+        send_coms(RSSI_ARRAY);
     }
 }
