@@ -1,149 +1,29 @@
-/* main.c - Application main entry point */
-
-/*
- * Copyright (c) 2015-2016 Intel Corporation
- *
- * SPDX-License-Identifier: Apache-2.0
- */
-
-#include <zephyr/types.h>
-#include <stddef.h>
-#include <errno.h>
 #include <zephyr/kernel.h>
-#include <zephyr/sys/printk.h>
+#include "central.h"
 
-#include <zephyr/bluetooth/bluetooth.h>
-#include <zephyr/bluetooth/hci.h>
-#include <zephyr/bluetooth/conn.h>
-#include <zephyr/bluetooth/uuid.h>
-#include <zephyr/bluetooth/gatt.h>
-#include <zephyr/sys/byteorder.h>
+#define CENTRAL_STACK_SIZE 2048
+#define CENTRAL_PRIORITY 5
 
-static void start_scan(void);
+/* 1. Manually define the stack area */
+K_THREAD_STACK_DEFINE(central_stack_area, CENTRAL_STACK_SIZE);
 
-static struct bt_conn *default_conn;
+/* 2. Define the thread data structure */
+struct k_thread central_thread_data;
 
-#define TARGET_ADDRESS ((uint8_t[]){0x01, 0x02, 0x03, 0x04, 0x05, 0xC0})
-
-static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
-			 struct net_buf_simple *ad)
-{
-	char addr_str[BT_ADDR_LE_STR_LEN];
-	int err;
-
-	if (default_conn) {
-		return;
-	}
-
-	/* We're only interested in connectable events */
-	if (type != BT_GAP_ADV_TYPE_ADV_IND &&
-	    type != BT_GAP_ADV_TYPE_ADV_DIRECT_IND) {
-		return;
-	}
-
-	bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
-	printk("Device found: %s (RSSI %d)\n", addr_str, rssi);
-
-	/* connect only to devices in close proximity */
-	if (strcmp(addr_str, TARGET_ADDRESS)) {
-		return;
-	}
-
-	if (bt_le_scan_stop()) {
-		return;
-	}
-
-	err = bt_conn_le_create(addr, BT_CONN_LE_CREATE_CONN,
-				BT_LE_CONN_PARAM_DEFAULT, &default_conn);
-	if (err) {
-		printk("Create conn to %s failed (%d)\n", addr_str, err);
-		start_scan();
-	}
-}
-
-static void start_scan(void)
-{
-	int err;
-
-	/* This demo doesn't require active scan */
-	err = bt_le_scan_start(BT_LE_SCAN_PASSIVE, device_found);
-	if (err) {
-		printk("Scanning failed to start (err %d)\n", err);
-		return;
-	}
-
-	printk("Scanning successfully started\n");
-}
-
-static void connected(struct bt_conn *conn, uint8_t err)
-{
-	char addr[BT_ADDR_LE_STR_LEN];
-
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-	if (err) {
-		printk("Failed to connect to %s %u %s\n", addr, err, bt_hci_err_to_str(err));
-
-		bt_conn_unref(default_conn);
-		default_conn = NULL;
-
-		start_scan();
-		return;
-	}
-
-	if (conn != default_conn) {
-		return;
-	}
-
-	printk("Connected: %s\n", addr);
-
-	//bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
-}
-
-static void disconnected(struct bt_conn *conn, uint8_t reason)
-{
-	char addr[BT_ADDR_LE_STR_LEN];
-
-	if (conn != default_conn) {
-		return;
-	}
-
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-	printk("Disconnected: %s, reason 0x%02x %s\n", addr, reason, bt_hci_err_to_str(reason));
-
-	bt_conn_unref(default_conn);
-	default_conn = NULL;
-
-	start_scan();
-}
-
-BT_CONN_CB_DEFINE(conn_callbacks) = {
-	.connected = connected,
-	.disconnected = disconnected,
-};
-
-
-
-
-K_THREAD_DEFINE(parse_thread_id, 1024, parse_thread, NULL, NULL, NULL, 7, 0, K_NO_WAIT);
-K_THREAD_DEFINE(central_thread_id, 1024, central_thread, NULL, NULL, NULL, 7, 0, K_NO_WAIT);
-K_THREAD_DEFINE(shell_thread_id, 1024, shell_thread, NULL, NULL, NULL, 7, 0, K_NO_WAIT);
-
-
+extern void central_thread(void *a, void *b, void *c);
 
 int main(void)
 {
-	int err;
+    /* 3. Create the thread at runtime */
+    k_tid_t tid = k_thread_create(&central_thread_data, central_stack_area,
+                                  K_THREAD_STACK_SIZEOF(central_stack_area),
+                                  central_thread,
+                                  NULL, NULL, NULL,
+                                  CENTRAL_PRIORITY, 0, K_NO_WAIT);
 
-	err = bt_enable(NULL);
-	if (err) {
-		printk("Bluetooth init failed (err %d)\n", err);
-		return 0;
-	}
+    if (!tid) {
+        printk("Failed to create central thread!\n");
+    }
 
-	printk("Bluetooth initialized\n");
-
-	start_scan();
-	return 0;
+    return 0;
 }

@@ -42,6 +42,7 @@ struct bt_nus_cb nus_listener = {
 
 int init_comms(void)
 {
+    
     int err;
 
     // 2. Register NUS
@@ -84,15 +85,14 @@ int send_comms(uint8_t *data, uint16_t len) // Pass length explicitly
 void comms_thread(void *a, void *b, void *c)
 {
     int8_t rssi_table[13];
-    while (init_comms()) {
-        printk("nah");
-    }
+    init_comms();
+        
     while (1) {
         // Wait for data from the sensor/scanner
         k_msgq_get(&rssi_msgq, &rssi_table, K_FOREVER);
 
         // Print for debugging
-        printk("Rssi table ready to send\n");
+        //printk("Rssi table ready to send\n");
 
         // Use the updated function with explicit length
         send_comms((uint8_t *)rssi_table, sizeof(rssi_table));
