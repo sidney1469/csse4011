@@ -77,10 +77,10 @@ void sensing_thread(void *a, void *b, void *c)
     bt_enable(NULL);
 
     struct bt_le_scan_param scan_param = {
-        .type = BT_LE_SCAN_TYPE_ACTIVE,
+        .type = BT_LE_SCAN_TYPE_PASSIVE,
         .options = BT_LE_SCAN_OPT_FILTER_DUPLICATE,
-        .interval = BT_GAP_SCAN_FAST_INTERVAL_MIN,
-        .window = BT_GAP_SCAN_FAST_WINDOW,
+        .interval = 4, // 100ms
+        .window = 1,    // 25ms (Radio is free 75% of the time)
     };
 
     struct scan_result result;

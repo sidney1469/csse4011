@@ -9,7 +9,7 @@
 #define MESSAGE_WAIT_TIME 1
 
 int init_comms(void);
-int send_comms(uint8_t *string);
+int send_comms(uint8_t *data, uint16_t len);
 
 static const struct bt_data ad[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
@@ -44,64 +44,57 @@ int init_comms(void)
 {
     int err;
 
-    // Define your desired address (LSB first)
-    bt_addr_le_t addr = {
-        .type = BT_ADDR_LE_RANDOM, .a.val = {0x01, 0x02, 0x03, 0x04, 0x05, 0xC0}
-        // C0 prefix required for static random
-    };
-
-    err = bt_id_create(&addr, NULL);
-    if (err < 0) {
-        printk("Failed to create identity: %d\n", err);
-        return err;
-    }
-
-    err = bt_enable(NULL);
-
-    printk("Sample - Bluetooth Peripheral NUS\n");
-
+    // 2. Register NUS
     err = bt_nus_cb_register(&nus_listener, NULL);
     if (err) {
-        printk("Failed to register NUS callback: %d\n", err);
+        printk("NUS register failed (err %d)\n", err);
         return err;
     }
 
+    // 3. Start Advertising
     err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
     if (err) {
-        printk("Failed to start advertising: %d\n", err);
+        printk("Advertising failed (err %d)\n", err);
         return err;
     }
 
-    printk("Initialization complete\n");
-
+    printk("Advertising as %s...\n", DEVICE_NAME);
     return 0;
 }
 
-int send_comms(uint8_t *string)
+int send_comms(uint8_t *data, uint16_t len) // Pass length explicitly
 {
     int err;
-    err = bt_nus_send(NULL, string, strlen(string));
-    printk("Data send - Result: %d\n", err);
+    
+    // Pass the actual length, don't use strlen for raw byte arrays
+    err = bt_nus_send(NULL, data, len);
 
-    if (err < 0 && (err != -EAGAIN) && (err != -ENOTCONN)) {
+    if (err == -ENOTCONN) {
+        printk("Data not sent: No central connected.\n");
+        return 0; 
+    } else if (err < 0) {
+        printk("BT Send error: %d\n", err);
         return err;
     }
+
+    printk("Data sent successfully\n");
     return 0;
 }
 
 void comms_thread(void *a, void *b, void *c)
 {
     int8_t rssi_table[13];
-    init_comms();
+    while (init_comms()) {
+        printk("nah");
+    }
     while (1) {
+        // Wait for data from the sensor/scanner
         k_msgq_get(&rssi_msgq, &rssi_table, K_FOREVER);
 
-        printk("Rssi table: ");
-        for (int i = 0; i < 13; i++) {
-            printk("%d ", rssi_table[i]);
-        }
-        printk("\n");
+        // Print for debugging
+        printk("Rssi table ready to send\n");
 
-        send_comms(rssi_table);
+        // Use the updated function with explicit length
+        send_comms((uint8_t *)rssi_table, sizeof(rssi_table));
     }
 }
