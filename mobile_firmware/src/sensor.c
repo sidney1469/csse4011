@@ -102,14 +102,7 @@ void sensing_thread(void *a, void *b, void *c)
         }
         if (count <= COUNT_MAX) {
 
-            k_msgq_purge(&rssi_msgq);
             k_msgq_put(&rssi_msgq, &rssi_table, K_NO_WAIT);
-
-            printk("Rssi table: ");
-            for (int i = 0; i < 13; i++) {
-                printk("%d ", rssi_table[i]);
-            }
-            printk("\n");
 
             count = 0;
         }

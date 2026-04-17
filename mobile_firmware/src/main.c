@@ -7,7 +7,7 @@
 
 #define STACK_SIZE       2048
 #define SENSING_PRIORITY 5
-#define COMMS_PRIORITY     5
+#define COMMS_PRIORITY   5
 
 /* Declare the thread functions defined in their respective files */
 extern void sensing_thread(void *a, void *b, void *c);
@@ -26,7 +26,7 @@ int main(void)
                     sensing_thread, NULL, NULL, NULL, SENSING_PRIORITY, 0, K_NO_WAIT);
 
     k_thread_create(&comms_thread_data, comms_stack, K_THREAD_STACK_SIZEOF(comms_stack),
-                     comms_thread, NULL, NULL, NULL, COMMS_PRIORITY, 0, K_NO_WAIT);
+                    comms_thread, NULL, NULL, NULL, COMMS_PRIORITY, 0, K_NO_WAIT);
     return 0;
 }
 
