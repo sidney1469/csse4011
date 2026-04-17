@@ -6,8 +6,7 @@
 
 #include "sensor.h"
 
-#define NAME_LEN  30
-#define COUNT_MAX 30
+#define NAME_LEN 30
 
 static const bt_addr_le_t nodelist[] = {
     {.type = BT_ADDR_LE_RANDOM, .a = {{0x67, 0x34, 0x85, 0xFE, 0x75, 0xF5}}},
@@ -92,19 +91,13 @@ void sensing_thread(void *a, void *b, void *c)
 
     bt_le_scan_start(&scan_param, NULL);
 
-    int count = 0;
-
     while (1) {
         k_msgq_get(&scan_msgq, &result, K_FOREVER);
         int i = addr_index(&result.addr);
         if (i != -1) {
             rssi_table[i] = result.rssi;
         }
-        if (count <= COUNT_MAX) {
 
-            k_msgq_put(&rssi_msgq, &rssi_table, K_NO_WAIT);
-
-            count = 0;
-        }
+        k_msgq_put(&rssi_msgq, &rssi_table, K_NO_WAIT);
     }
 }
