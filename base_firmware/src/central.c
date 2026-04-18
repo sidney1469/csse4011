@@ -15,9 +15,11 @@ static void start_scan(void);
 
 static struct bt_conn *default_conn;
 
+
+/* Target peripheral MAC address (LSB first) */
 /* Target peripheral MAC address (LSB first) */
 static const bt_addr_t target_mac = {
-    .val = {0x01, 0x02, 0x03, 0x04, 0x05, 0xC0}
+    .val = {0x65, 0xA9, 0xB3, 0x5F, 0x9A, 0xC5}
 };
 
 /* NUS UUIDs */
@@ -41,7 +43,13 @@ static uint8_t on_received(struct bt_conn *conn,
         return BT_GATT_ITER_STOP;
     }
 
-    printk("Received %d bytes: %.*s\n", length, length, (char *)data);
+    const int8_t *bytes = (const uint8_t *)data;
+
+    printk("Received %d bytes: \n", length);
+    for (int i = 0; i < length; i++) {
+        printk("%d ", bytes[i]);
+    }
+    printk("\n");
     return BT_GATT_ITER_CONTINUE;
 }
 
@@ -162,19 +170,17 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
         return;
     }
 
-    /* We only care about connectable advertising */
     if (type != BT_GAP_ADV_TYPE_ADV_IND &&
         type != BT_GAP_ADV_TYPE_ADV_DIRECT_IND) {
         return;
     }
 
-    /* CHANGE: Instead of checking target_mac, we check if NUS UUID is in the AD */
-    if (!ad_has_nus_uuid(ad)) {
+    if (bt_addr_cmp(&addr->a, &target_mac) != 0) {
         return;
     }
 
     bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
-    printk("NUS Service found on: %s (RSSI %d)\n", addr_str, rssi);
+    printk("Target found: %s (RSSI %d)\n", addr_str, rssi);
 
     if (bt_le_scan_stop()) {
         return;
