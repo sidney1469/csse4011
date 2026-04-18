@@ -33,7 +33,7 @@ struct k_msgq scan_msgq;
 struct k_msgq rssi_msgq;
 
 K_MSGQ_DEFINE(scan_msgq, sizeof(struct scan_result), 30, 4);
-K_MSGQ_DEFINE(rssi_msgq, 13 * sizeof(uint8_t), 1, 4);
+K_MSGQ_DEFINE(rssi_msgq, 13 * sizeof(int8_t), 1, 4);
 
 static bool addr_match(const bt_addr_le_t *addr)
 {

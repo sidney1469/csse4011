@@ -11,7 +11,7 @@
 static struct k_work adv_wq;
 
 int init_comms(void);
-int send_comms(uint8_t *data, uint16_t len);
+int send_comms(int8_t *data, uint16_t len);
 static void adv_wq_handler(struct k_work *work);
 
 static const struct bt_data ad[] = {
@@ -69,7 +69,7 @@ int init_comms(void)
     return 0;
 }
 
-int send_comms(uint8_t *data, uint16_t len) // Pass length explicitly
+int send_comms(int8_t *data, uint16_t len) // Pass length explicitly
 {
     int err;
 
@@ -86,7 +86,7 @@ int send_comms(uint8_t *data, uint16_t len) // Pass length explicitly
 
     printk("Data sent: ");
     for (int i = 0; i < len; i++) {
-        printk("%X ", data[i]);
+        printk("%d ", data[i]);
     }
     printk("\n");
     return 0;
@@ -105,7 +105,7 @@ void comms_thread(void *a, void *b, void *c)
         // printk("Rssi table ready to send\n");
 
         // Use the updated function with explicit length
-        send_comms((uint8_t *)rssi_table, sizeof(rssi_table));
+        send_comms((int8_t *)rssi_table, sizeof(rssi_table));
     }
 }
 
