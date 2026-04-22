@@ -5,7 +5,6 @@ import serial
 import serial.tools.list_ports
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-
 BAUD_RATE = 115200
 SERIAL_PORT = "/dev/tty.usbmodem1101"
 
@@ -35,13 +34,18 @@ def rssi_to_distance(rssi: int) -> float:
     distance = round(10 ** ((MEAS_POWER - rssi) / (10 * PATH_LOSS_EXP)),2)
     return distance
 
+@app.get("/get")
+def get_fun():
+    print("here")
+    return 200
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     clients.add(websocket)
     print(f"Client connected — {len(clients)} total")
     try:
-        await websocket.wait_for_disconnect()
+        await websocket.receive_text()
     except WebSocketDisconnect:
         pass
     finally:
@@ -52,7 +56,7 @@ def parse_packet(line: str) -> dict | None:
     try:
         raw = json.loads(line)
         data = raw.get("data_buffer", [])
-        data_len = raw.get("data_len", 0)
+        data_len = len(data)
 
         if data_len != NUM_NODES:
             print(f"Unexpected data_len: {data_len}, skipping")
