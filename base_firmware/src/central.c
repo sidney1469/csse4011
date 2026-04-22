@@ -194,7 +194,7 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
         return;
     }
 
-    if (bt_addr_cmp(&addr->a, &target_mac_1) != 0 || bt_addr_cmp(&addr->a, &target_mac_2) != 0) {
+    if ((bt_addr_cmp(&addr->a, &target_mac_1) != 0 ) && (bt_addr_cmp(&addr->a, &target_mac_2) != 0)) {
         return;
     }
 
