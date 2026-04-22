@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <errno.h>
 #include <zephyr/sys/printk.h>
+#include "kalman.h"
 
 // parse.c
 static const struct json_obj_descr bt_data_received_descr[] = {
@@ -28,9 +29,14 @@ void parse_data_into_json(struct bt_data_recieved data)
 void parse_thread(void *a, void *b, void *c)
 {
     struct bt_data_recieved data;
-
+    int init = 1;
     while (1) {
         k_msgq_get(&bt_data_msgq, &data, K_FOREVER);
+        if (!init) {    
+            calculate_kalman(data.data_buffer, data.data_buffer);
+        } else {
+            init = 0;
+        }
         parse_data_into_json(data);  // <-- you never called this
     }
 }

@@ -8,6 +8,7 @@ target_sources(app PRIVATE
   src/main.c
   src/central.c
   src/parse.c
+  src/kalman.c
 )
 
 zephyr_library_include_directories(${ZEPHYR_BASE}/samples/bluetooth)
