@@ -45,6 +45,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
 async def serial_reader():
 
+    loop = asyncio.get_event_loop()
+
     print(f"Opening serial port {SERIAL_PORT} at {BAUD_RATE} baud...")
     try:
         ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
@@ -56,6 +58,11 @@ async def serial_reader():
         return
 
     print("Serial port open, waiting for packets...")
+
+    while True:
+        line = await loop.run_in_executor(None, ser.readline)
+        decoded_line = line.decode("utf-8", errors="ignore").strip()
+        print(f"Raw: {decoded_line}")
 
 
 @app.on_event("startup")
