@@ -2,10 +2,7 @@
 #include <math.h>
 #include <string.h>
 
-#define N_BEACONS 13
-#define N_AXIS    3
-#define N_ROWS    N_BEACONS - 1
-#define N_COLS    N_AXIS
+#include "least_squares.h"
 
 void transpose_matrix(float *A, float *At, int rowsA, int colsA)
 {
@@ -101,4 +98,24 @@ int lstsq_solve(float A[N_ROWS][N_COLS], float b[N_ROWS], float pos[N_COLS])
     mat_multiply((float *)AtA_inv, Atb, pos, N_COLS, N_COLS, 1);
 
     return 0;
+}
+
+float rssi_to_distance(float rssi, float measured_power, float path_loss_exp)
+{
+    return powf(10.0f, (measured_power - rssi) / (10.0f * path_loss_exp));
+}
+
+int localise(float beacon_coords[N_BEACONS][N_AXIS], float rssi[N_BEACONS], float measured_power,
+             float path_loss_exp, float pos[N_COLS])
+{
+    float displacements[N_BEACONS];
+    for (int i = 0; i < N_BEACONS; i++) {
+        displacements[i] = rssi_to_distance(rssi[i], measured_power, path_loss_exp);
+    }
+
+    float A[N_ROWS][N_COLS];
+    float b[N_ROWS];
+    build_Ab(beacon_coords, displacements, A, b);
+
+    return lstsq_solve(A, b, pos);
 }
