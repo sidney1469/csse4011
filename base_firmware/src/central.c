@@ -22,11 +22,13 @@ char data_msgq_buffer[10 * sizeof(struct bt_data_recieved)];
 K_MSGQ_DEFINE(bt_data_msgq, sizeof(struct bt_data_recieved), 10, 4);
 
 /* Target peripheral MAC address (LSB first) */
-static const bt_addr_t target_mac = {
+static const bt_addr_t target_mac_1 = {
     .val = {0x65, 0xA9, 0xB3, 0x5F, 0x9A, 0xC5}
 };
 
-
+static const bt_addr_t target_mac_2 = {
+    .val = {0x15, 0xFB, 0xFA, 0xD7, 0xC4, 0xC1}
+};
 
 
 /* NUS UUIDs */
@@ -53,11 +55,12 @@ static uint8_t on_received(struct bt_conn *conn,
     const int8_t *bytes = (const uint8_t *)data;
 
     struct bt_data_recieved new_data = {0};
+    uint16_t c = 0;
     for (int i = 0; i < length; i++) {
-        new_data.data_buffer[i] = (int32_t)bytes[i];
+        new_data.data_buffer[i] = (int8_t)bytes[i];
+        c++;
     }
-    new_data.data_len = length;
-    printk("Data_Len: %u\n", new_data.data_len);
+    new_data.data_len = c;
 
     k_msgq_put(&bt_data_msgq, &new_data, K_NO_WAIT);
 
@@ -191,7 +194,7 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
         return;
     }
 
-    if (bt_addr_cmp(&addr->a, &target_mac) != 0) {
+    if (bt_addr_cmp(&addr->a, &target_mac_1) != 0 || bt_addr_cmp(&addr->a, &target_mac_2) != 0) {
         return;
     }
 
