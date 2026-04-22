@@ -1,6 +1,7 @@
 base_firmware/build
 base_firmware/build/*
-*/build/*
+
+**/build/
 **/.expo/
 **/node_modules/
 # Node / Expo

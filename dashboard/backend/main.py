@@ -9,6 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 BAUD_RATE = 115200
 SERIAL_PORT = "/dev/tty.usbmodem1101"
 
+NUM_NODES = 13
+NODE_NAMES = ["NODE_A", "NODE_B", "NODE_C", "NODE_D", "NODE_E",
+              "NODE_F", "NODE_G", "NODE_H", "NODE_I", "NODE_J",
+              "NODE_K", "NODE_L", "NODE_M"]
+
 MEAS_POWER = -56   # RSSI at 1 metre
 PATH_LOSS_EXP = 2.5 # Needs to be calibrated (higher for more obstructions)
                 # ~2 for free space ~2.5 - 4 indoors
@@ -43,6 +48,38 @@ async def websocket_endpoint(websocket: WebSocket):
         clients.discard(websocket)
         print(f"Client disconnected — {len(clients)} total")
 
+def parse_packet(line: str) -> dict | None:
+    try:
+        raw = json.loads(line)
+        data = raw.get("data_buffer", [])
+        data_len = raw.get("data_len", 0)
+
+        if data_len != NUM_NODES:
+            print(f"Unexpected data_len: {data_len}, skipping")
+            return None
+        
+        nodes = []
+        for i in range(data_len):
+            rssi = data[i]
+            nodes.append({
+                "name": NODE_NAMES[i],
+                "rssi": rssi,
+                "distance": rssi_to_distance(rssi),
+            })
+        return {"nodes": nodes}
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        print(f"Parse error: {e}")
+        return None
+
+async def broadcast(message: str):
+    disconnected = set()
+    for client in clients:
+        try:
+            await client.send_text(message)
+        except:
+            disconnected.add(client)
+    clients.difference_update(disconnected)
+
 async def serial_reader():
 
     loop = asyncio.get_event_loop()
@@ -63,6 +100,9 @@ async def serial_reader():
         line = await loop.run_in_executor(None, ser.readline)
         decoded_line = line.decode("utf-8", errors="ignore").strip()
         print(f"Raw: {decoded_line}")
+        packet = parse_packet(decoded_line)
+        if packet:
+            await broadcast(json.dumps(packet))
 
 
 @app.on_event("startup")
