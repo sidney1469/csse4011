@@ -10,17 +10,24 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/services/nus.h>
 #include <zephyr/sys/byteorder.h>
+#include "central.h"
 
 static void start_scan(void);
 
 static struct bt_conn *default_conn;
 
+char data_msgq_buffer[10 * sizeof(struct bt_data_recieved)];
 
-/* Target peripheral MAC address (LSB first) */
+// At file scope, replaces the manual init entirely
+K_MSGQ_DEFINE(bt_data_msgq, sizeof(struct bt_data_recieved), 10, 4);
+
 /* Target peripheral MAC address (LSB first) */
 static const bt_addr_t target_mac = {
     .val = {0x65, 0xA9, 0xB3, 0x5F, 0x9A, 0xC5}
 };
+
+
+
 
 /* NUS UUIDs */
 static struct bt_uuid_128 nus_svc_uuid = BT_UUID_INIT_128(BT_UUID_NUS_SRV_VAL);
@@ -45,11 +52,20 @@ static uint8_t on_received(struct bt_conn *conn,
 
     const int8_t *bytes = (const uint8_t *)data;
 
-    printk("Received %d bytes: \n", length);
+    struct bt_data_recieved new_data = {0};
+    for (int i = 0; i < length; i++) {
+        new_data.data_buffer[i] = (int32_t)bytes[i];
+    }
+    new_data.data_len = length;
+    printk("Data_Len: %u\n", new_data.data_len);
+
+    k_msgq_put(&bt_data_msgq, &new_data, K_NO_WAIT);
+
+    /*printk("Received %d bytes: \n", length);
     for (int i = 0; i < length; i++) {
         printk("%d ", bytes[i]);
     }
-    printk("\n");
+    printk("\n");*/
     return BT_GATT_ITER_CONTINUE;
 }
 
@@ -151,14 +167,14 @@ static bool ad_has_nus_uuid(struct net_buf_simple *ad)
     return found;
 }
 
-static uint8_t on_write(struct bt_conn *conn,
-                        const struct bt_gatt_attr *attr,
-                        const void *data, uint16_t len,
-                        uint16_t offset, uint8_t flags)
-{
-    printk("Phone wrote %u bytes: %.*s\n", len, len, (char *)data);
-    return BT_GATT_ITER_CONTINUE;
-}
+// static uint8_t on_write(struct bt_conn *conn,
+//                         const struct bt_gatt_attr *attr,
+//                         const void *data, uint16_t len,
+//                         uint16_t offset, uint8_t flags)
+// {
+//     printk("Phone wrote %u bytes: %.*s\n", len, len, (char *)data);
+//     return BT_GATT_ITER_CONTINUE;
+// }
 
 static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
                           struct net_buf_simple *ad)
@@ -264,8 +280,10 @@ void central_thread(void *a, void *b, void *c)
     printk("Bluetooth initialized\n");
     start_scan();
 
+    
+
     while (1) {
-        printk("running\n");
+        //printk("running\n");
         k_sleep(K_MSEC(1000));
     }
 }
