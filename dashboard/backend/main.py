@@ -1,11 +1,15 @@
 import math
 import serial
 import serial.tools.list_ports
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 
 BAUD_RATE = 115200
 MEAS_POWER = -56   # RSSI at 1 metre
 PATH_LOSS_EXP = 2.5 # Needs to be calibrated (higher for more obstructions)
                 # ~2 for free space ~2.5 - 4 indoors
+
+app = FastAPI()
 
 def rssi_to_distance(rssi: int) -> float:
     if rssi == 0:
