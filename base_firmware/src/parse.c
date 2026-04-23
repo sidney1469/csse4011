@@ -21,7 +21,7 @@ static const struct json_obj_descr data_send_descr[] = {
     JSON_OBJ_DESCR_PRIM(struct data_send, pos_z, JSON_TOK_NUMBER),
 };
 
-void parse_data_into_json(struct bt_data_received data, float pos[N_COLS])
+void parse_data_into_json(struct bt_data_received data, float pos[N_AXIS])
 {
     struct data_send send;
     char buffer[256];
@@ -44,19 +44,15 @@ void parse_thread(void *a, void *b, void *c)
 
     float coords[N_BEACONS][N_AXIS];
     float smoothed[N_BEACONS];
-    float pos[N_COLS];
+    float pos[N_AXIS];
     int8_t filtered;
 
     while (1) {
         k_msgq_get(&bt_data_msgq, &data, K_FOREVER);
-        int count = get_beacons_coords(coords, N_BEACONS);
-        if (count < 4) {
-            printk("Not enough beacons in list to perform least squares: %d\n", count);
-            continue;
-        }
+        get_beacons_coords(coords, N_BEACONS);
 
         for (int i = 0; i < N_BEACONS; i++) {
-            if (coords[i][0] == -1.0f) {
+            if (coords[i][0] == -1.0f || data.data_buffer[i] == 0) {
                 smoothed[i] = NAN;
             } else {
                 calculate_kalman(i, data.data_buffer[i], &filtered);
@@ -64,8 +60,12 @@ void parse_thread(void *a, void *b, void *c)
             }
         }
 
-        if (localise(coords, smoothed, MEASURED_POWER, PATH_LOSS_EXP, pos) != 0) {
+        int beacons_used = localise(coords, smoothed, MEASURED_POWER, PATH_LOSS_EXP, pos);
+        if (beacons_used == -1) {
             printk("Localisation failed\n");
+            continue;
+        } else {
+            printk("Localisation succesful. Estimated position using %d nodes\n", beacons_used);
         }
 
         parse_data_into_json(data, pos);

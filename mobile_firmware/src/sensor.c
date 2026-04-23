@@ -6,7 +6,8 @@
 
 #include "sensor.h"
 
-#define NAME_LEN 30
+#define NAME_LEN        30
+#define NODE_TIMEOUT_MS 3000
 
 static const bt_addr_le_t nodelist[] = {
     {.type = BT_ADDR_LE_RANDOM, .a = {{0x67, 0x34, 0x85, 0xFE, 0x75, 0xF5}}},
@@ -86,16 +87,29 @@ void sensing_thread(void *a, void *b, void *c)
     struct scan_result result;
 
     int8_t rssi_table[13] = {0};
+    int64_t last_seen[13] = {0};
 
     bt_le_scan_cb_register(&scan_callbacks);
-
     bt_le_scan_start(&scan_param, NULL);
 
     while (1) {
-        k_msgq_get(&scan_msgq, &result, K_FOREVER);
-        int i = addr_index(&result.addr);
-        if (i != -1) {
-            rssi_table[i] = result.rssi;
+        int err = k_msgq_get(&scan_msgq, &result, K_FOREVER);
+
+        if (!err) {
+            int i = addr_index(&result.addr);
+            if (i != -1) {
+                rssi_table[i] = result.rssi;
+                last_seen[i] = k_uptime_get();
+            }
+        }
+
+        uint64_t curr_time = k_uptime_get();
+
+        for (int i = 0; i < 13; i++) {
+            if (last_seen[i] != 0 && (curr_time - last_seen[i]) > NODE_TIMEOUT_MS) {
+                rssi_table[i] = 0;
+                last_seen[i] = 0; /* reset so we don't zero repeatedly */
+            }
         }
 
         k_msgq_put(&rssi_msgq, &rssi_table, K_NO_WAIT);
