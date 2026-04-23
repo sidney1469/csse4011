@@ -81,7 +81,7 @@ int lstsq_solve(float A[N_ROWS][N_COLS], float b[N_ROWS], float pos[N_COLS])
 
     // AtA = Aᵀ * A  (3x3)
     float AtA[N_COLS][N_COLS];
-    multiply_matrix(At, (float *)A, AtA, N_COLS, N_ROWS, N_COLS);
+    multiply_matrix((float *)At, (float *)A, (float *)AtA, N_COLS, N_ROWS, N_COLS);
 
     // Atb = Aᵀ * b  (3x1)
     float Atb[N_COLS];
