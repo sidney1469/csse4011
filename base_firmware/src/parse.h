@@ -1,6 +1,9 @@
 #ifndef PARSE_H
 #define PARSE_H
 
-void parse_thread(void*a , void* b, void* c);
+#define PATH_LOSS_EXP  2.5
+#define MEASURED_POWER -56
+
+void parse_thread(void *a, void *b, void *c);
 
 #endif /* CENTRAL_H */
