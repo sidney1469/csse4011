@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <zephyr/sys/printk.h>
 
+#include "parse.h"
 #include "central.h"
 #include "kalman.h"
 #include "shell.h"
@@ -37,8 +38,7 @@ void parse_thread(void *a, void *b, void *c)
     float coords[N_BEACONS][N_AXIS];
     float smoothed[N_BEACONS];
     float pos[N_COLS];
-
-    int init = 1;
+    int8_t filtered;
 
     while (1) {
         k_msgq_get(&bt_data_msgq, &data, K_FOREVER);
@@ -48,25 +48,21 @@ void parse_thread(void *a, void *b, void *c)
             continue;
         }
 
-        if (!init) {
-            for (int i = 0; i < N_BEACONS; i++) {
-                if (coords[i][0] == -1.0f) {
-                    smoothed[i] = NAN;
-                } else {
-                    calculate_kalman(data.data_buffer[i], &data.data_buffer[i]);
-                }
-            }
-
-            if (localise(coords, smoothed, -59.0f, 2.0f, pos) == 0) {
-                printk("Position: (%d.%02d, %d.%02d, %d.%02d)\n", (int)pos[0],
-                       (int)(pos[0] * 100) % 100, (int)pos[1], (int)(pos[1] * 100) % 100,
-                       (int)pos[2], (int)(pos[2] * 100) % 100);
+        for (int i = 0; i < N_BEACONS; i++) {
+            if (coords[i][0] == -1.0f) {
+                smoothed[i] = NAN;
             } else {
-                printk("Localisation failed\n");
+                calculate_kalman(i, data.data_buffer[i], &filtered);
+                smoothed[i] = (float)filtered;
             }
-        } else {
-            init = 0;
         }
+
+        if (localise(coords, smoothed, MEASURED_POWER, PATH_LOSS_EXP, pos) == 0) {
+            printk("Position: (%f, %f, %f)\n", pos[0], pos[1], pos[2]);
+        } else {
+            printk("Localisation failed\n");
+        }
+
         parse_data_into_json(data);
     }
 }

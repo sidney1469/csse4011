@@ -28,5 +28,6 @@ int beacon_add(const char *name, const char *mac, uint16_t major, uint16_t minor
 int beacon_remove(const char *name);
 void beacon_print(struct ibeacon_node *node);
 int get_beacons_coords(float coords[][3], int max_beacons);
+void init_default_beacons(void);
 
 #endif /* BEACON_H */

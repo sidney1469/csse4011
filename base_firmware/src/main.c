@@ -1,6 +1,7 @@
 #include <zephyr/kernel.h>
 #include "central.h"
 #include "parse.h"
+#include "shell.h"
 
 #define CENTRAL_STACK_SIZE 2048
 #define PARSE_STACK_SIZE   2048
@@ -19,6 +20,7 @@ extern void parse_thread(void *a, void *b, void *c);
 
 int main(void)
 {
+    init_default_beacons();
     /* 3. Create the thread at runtime */
     k_tid_t tid = k_thread_create(&central_thread_data, central_stack_area,
                                   K_THREAD_STACK_SIZEOF(central_stack_area), central_thread, NULL,
