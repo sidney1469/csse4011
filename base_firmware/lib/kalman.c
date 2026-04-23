@@ -11,7 +11,8 @@ extern struct k_msgq kalman_data_msgq;
 
 K_MSGQ_DEFINE(kalman_data_msgq, sizeof(struct kalman_struct), 10, 4);
 
-int calculate_kalman(int8_t value, float out) {
+int calculate_kalman(int8_t value, float *out)
+{
 
     float Q = 0.022f;
     float R = 0.617f;
@@ -30,20 +31,19 @@ int calculate_kalman(int8_t value, float out) {
     float P_last;
 
     last_value = (float)newdata.last_value;
-    P_last     = (float)newdata.P_last;
-    
+    P_last = (float)newdata.P_last;
 
     float P_data;
 
-    P_temp  = P_last + Q;
-    K       = P_temp * (1.0f / (P_temp + R));
-    x_est   = last_value + K * ((float)value - last_value);
+    P_temp = P_last + Q;
+    K = P_temp * (1.0f / (P_temp + R));
+    x_est = last_value + K * ((float)value - last_value);
     P_data = (1.0f - K) * P_temp;
 
-    out = (int8_t)x_est;
-    
-    newdata.last_value = out;
-    newdata.P_last     = (int8_t)P_data;
+    *out = x_est;
+
+    newdata.last_value = (int8_t)x_est;
+    newdata.P_last = (int8_t)P_data;
 
     if (k_msgq_put(&kalman_data_msgq, &newdata, K_NO_WAIT) != 0) {
         return -2;

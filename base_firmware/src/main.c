@@ -33,6 +33,9 @@ int main(void)
     k_tid_t tid2 = k_thread_create(&parse_thread_data, parse_stack_area,
                                    K_THREAD_STACK_SIZEOF(parse_stack_area), parse_thread, NULL,
                                    NULL, NULL, PARSE_PRIORITY, 0, K_NO_WAIT);
+    if (!tid2) {
+        printk("Failed to create parsing thread!\n");
+    }
 
     return 0;
 }
