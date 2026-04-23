@@ -14,20 +14,27 @@
 #include "shell.h"
 #include "least_squares.h"
 
-// parse.c
-static const struct json_obj_descr bt_data_received_descr[] = {
-    JSON_OBJ_DESCR_ARRAY(struct bt_data_recieved, data_buffer, NUS_MAX_DATA_LEN, data_len,
-                         JSON_TOK_INT),
+static const struct json_obj_descr data_send_descr[] = {
+    JSON_OBJ_DESCR_ARRAY(struct data_send, data_buffer, NUS_MAX_DATA_LEN, data_len, JSON_TOK_INT),
+    JSON_OBJ_DESCR_PRIM(struct data_send, pos_x, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_PRIM(struct data_send, pos_y, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_PRIM(struct data_send, pos_z, JSON_TOK_NUMBER),
 };
 
-void parse_data_into_json(struct bt_data_recieved data)
+void parse_data_into_json(struct bt_data_recieved data, float pos[N_COLS])
 {
-    char buffer[128];
-    int ret;
+    struct data_send send;
+    char buffer[256];
 
-    ret = json_obj_encode_buf(bt_data_received_descr, ARRAY_SIZE(bt_data_received_descr), &data,
-                              buffer, sizeof(buffer));
+    memcpy(send.data_buffer, data.data_buffer, sizeof(send.data_buffer));
 
+    send.data_len = data.data_len;
+    send.pos_x = (int32_t)(pos[0] * 100);
+    send.pos_y = (int32_t)(pos[1] * 100);
+    send.pos_z = (int32_t)(pos[2] * 100);
+
+    json_obj_encode_buf(data_send_descr, ARRAY_SIZE(data_send_descr), &send, buffer,
+                        sizeof(buffer));
     printk("%s\n", buffer);
 }
 
@@ -57,12 +64,10 @@ void parse_thread(void *a, void *b, void *c)
             }
         }
 
-        if (localise(coords, smoothed, MEASURED_POWER, PATH_LOSS_EXP, pos) == 0) {
-            printk("Position: (%f, %f, %f)\n", pos[0], pos[1], pos[2]);
-        } else {
+        if (localise(coords, smoothed, MEASURED_POWER, PATH_LOSS_EXP, pos) != 0) {
             printk("Localisation failed\n");
         }
 
-        parse_data_into_json(data);
+        parse_data_into_json(data, pos);
     }
 }

@@ -28,12 +28,6 @@ app.add_middleware(
 
 clients: set[WebSocket] = set()
 
-def rssi_to_distance(rssi: int) -> float:
-    if rssi == 0:
-        return -1; # error
-    distance = round(10 ** ((MEAS_POWER - rssi) / (10 * PATH_LOSS_EXP)),2)
-    return distance
-
 @app.get("/get")
 def get_fun():
     print("here")
@@ -67,10 +61,12 @@ def parse_packet(line: str) -> dict | None:
             rssi = data[i]
             nodes.append({
                 "name": NODE_NAMES[i],
-                "rssi": rssi,
-                "distance": rssi_to_distance(rssi),
+                "rssi": rssi
             })
-        return {"nodes": nodes}
+        return {"nodes": nodes, "position": { "x": raw.get("pos_x", 0) / 100.0, 
+                                             "y": raw.get("pos_y", 0) / 100.0, 
+                                             "z": raw.get("pos_z", 0) / 100.0,
+                                             }}
     except (json.JSONDecodeError, KeyError, TypeError) as e:
         print(f"Parse error: {e}")
         return None
