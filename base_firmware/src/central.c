@@ -16,10 +16,10 @@ static void start_scan(void);
 
 static struct bt_conn *default_conn;
 
-char data_msgq_buffer[10 * sizeof(struct bt_data_recieved)];
+char data_msgq_buffer[10 * sizeof(struct bt_data_received)];
 
 // At file scope, replaces the manual init entirely
-K_MSGQ_DEFINE(bt_data_msgq, sizeof(struct bt_data_recieved), 10, 4);
+K_MSGQ_DEFINE(bt_data_msgq, sizeof(struct bt_data_received), 10, 4);
 
 /* Target peripheral MAC address (LSB first) */
 static const bt_addr_t target_mac_1 = {.val = {0x65, 0xA9, 0xB3, 0x5F, 0x9A, 0xC5}};
@@ -48,7 +48,7 @@ static uint8_t on_received(struct bt_conn *conn, struct bt_gatt_subscribe_params
 
     const int8_t *bytes = (const uint8_t *)data;
 
-    struct bt_data_recieved new_data = {0};
+    struct bt_data_received new_data = {0};
     uint16_t c = 0;
     for (int i = 0; i < length; i++) {
         new_data.data_buffer[i] = (int8_t)bytes[i];
@@ -124,56 +124,6 @@ static void start_discovery(struct bt_conn *conn)
         printk("Discovery failed to start: %d\n", err);
     }
 }
-
-/* ── Scan ────────────────────────────────────────────────────────────────── */
-/* Helper function to parse advertising data and look for the NUS UUID */
-static bool ad_has_nus_uuid(struct net_buf_simple *ad)
-{
-    struct net_buf_simple_state state;
-    bool found = false;
-
-    net_buf_simple_save(ad, &state);
-
-    while (ad->len > 1) {
-        uint8_t len = net_buf_simple_pull_u8(ad);
-        if (len == 0) {
-            break;
-        }
-        if (len > ad->len) {
-            break;
-        }
-
-        uint8_t type = net_buf_simple_pull_u8(ad);
-        /* Check for 128-bit Service UUIDs (Complete or Incomplete) */
-        if (type == BT_DATA_UUID128_SOME || type == BT_DATA_UUID128_ALL) {
-            while (len >= 17) {
-                struct bt_uuid_128 uuid;
-                /* Pull 16 bytes for a 128-bit UUID */
-                memcpy(uuid.val, net_buf_simple_pull_mem(ad, 16), 16);
-                uuid.uuid.type = BT_UUID_TYPE_128;
-
-                if (bt_uuid_cmp(&uuid.uuid, &nus_svc_uuid.uuid) == 0) {
-                    found = true;
-                }
-                len -= 16;
-            }
-        } else {
-            net_buf_simple_pull_mem(ad, len - 1);
-        }
-    }
-
-    net_buf_simple_restore(ad, &state);
-    return found;
-}
-
-// static uint8_t on_write(struct bt_conn *conn,
-//                         const struct bt_gatt_attr *attr,
-//                         const void *data, uint16_t len,
-//                         uint16_t offset, uint8_t flags)
-// {
-//     printk("Phone wrote %u bytes: %.*s\n", len, len, (char *)data);
-//     return BT_GATT_ITER_CONTINUE;
-// }
 
 static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
                          struct net_buf_simple *ad)

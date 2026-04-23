@@ -21,7 +21,7 @@ static const struct json_obj_descr data_send_descr[] = {
     JSON_OBJ_DESCR_PRIM(struct data_send, pos_z, JSON_TOK_NUMBER),
 };
 
-void parse_data_into_json(struct bt_data_recieved data, float pos[N_COLS])
+void parse_data_into_json(struct bt_data_received data, float pos[N_COLS])
 {
     struct data_send send;
     char buffer[256];
@@ -40,7 +40,7 @@ void parse_data_into_json(struct bt_data_recieved data, float pos[N_COLS])
 
 void parse_thread(void *a, void *b, void *c)
 {
-    struct bt_data_recieved data;
+    struct bt_data_received data;
 
     float coords[N_BEACONS][N_AXIS];
     float smoothed[N_BEACONS];
