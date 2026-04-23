@@ -1,5 +1,5 @@
-#ifndef BEACON_H
-#define BEACON_H
+#ifndef SHELL_H
+#define SHELL_H
 
 #include <zephyr/sys/slist.h>
 #include <stdint.h>
@@ -13,6 +13,7 @@ struct ibeacon_node {
     uint16_t minor;
     float x;
     float y;
+    float z;
     char left_neighbour[32];
     char right_neighbour[32];
 };

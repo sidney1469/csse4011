@@ -11,13 +11,14 @@ struct ibeacon_node {
     uint16_t minor;
     float x;
     float y;
+    float z;
     char left_neighbour[32];
     char right_neighbour[32];
 };
 
 static sys_slist_t beacon_list = SYS_SLIST_STATIC_INIT(&beacon_list);
 
-/* beacon add <name> <mac> <major> <minor> <x> <y> <left> <right> */
+/* beacon add <name> <mac> <major> <minor> <x> <y> <z> <left> <right> */
 static int cmd_beacon_add(const struct shell *sh, size_t argc, char **argv)
 {
     struct ibeacon_node *node = k_malloc(sizeof(struct ibeacon_node));
@@ -32,8 +33,9 @@ static int cmd_beacon_add(const struct shell *sh, size_t argc, char **argv)
     node->minor = atoi(argv[4]);
     node->x     = atof(argv[5]);
     node->y     = atof(argv[6]);
-    strncpy(node->left_neighbour,  argv[7], sizeof(node->left_neighbour) - 1);
-    strncpy(node->right_neighbour, argv[8], sizeof(node->right_neighbour) - 1);
+    node->z     = atof(argv[7]);
+    strncpy(node->left_neighbour,  argv[8], sizeof(node->left_neighbour) - 1);
+    strncpy(node->right_neighbour, argv[9], sizeof(node->right_neighbour) - 1);
 
     sys_slist_append(&beacon_list, &node->node);
     shell_print(sh, "Added beacon: %s at (%.1f, %.1f)", node->name, node->x, node->y);
