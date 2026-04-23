@@ -11,7 +11,7 @@ extern struct k_msgq kalman_data_msgq;
 
 K_MSGQ_DEFINE(kalman_data_msgq, sizeof(struct kalman_struct), 10, 4);
 
-int calculate_kalman(int8_t value, float *out)
+int calculate_kalman(int8_t value, int8_t* out)
 {
 
     float Q = 0.022f;
@@ -40,7 +40,8 @@ int calculate_kalman(int8_t value, float *out)
     x_est = last_value + K * ((float)value - last_value);
     P_data = (1.0f - K) * P_temp;
 
-    *out = x_est;
+    int8_t tmp = (int8_t)round(x_est);
+    out = &tmp;
 
     newdata.last_value = (int8_t)x_est;
     newdata.P_last = (int8_t)P_data;
