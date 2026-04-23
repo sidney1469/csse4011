@@ -30,3 +30,6 @@ ios/
 # Environment files
 .env
 .env.*
+
+# Python cache
+**/__pycache__
