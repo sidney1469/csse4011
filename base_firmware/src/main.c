@@ -1,7 +1,7 @@
 #include <zephyr/kernel.h>
 #include "central.h"
 #include "parse.h"
-#include "../lib/least_squares.h"
+#include "least_squares.h"
 
 #define CENTRAL_STACK_SIZE 2048
 #define PARSE_STACK_SIZE   2048
