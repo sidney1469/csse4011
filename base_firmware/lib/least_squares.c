@@ -8,7 +8,7 @@ void transpose_matrix(float *A, float *At, int rowsA, int colsA)
 {
     for (int i = 0; i < rowsA; i++) {
         for (int j = 0; j < colsA; j++) {
-            At[j * rowsA + i] = A[i * colsA + j]
+            At[j * rowsA + i] = A[i * colsA + j];
         }
     }
 }
@@ -77,25 +77,25 @@ int lstsq_solve(float A[N_ROWS][N_COLS], float b[N_ROWS], float pos[N_COLS])
 
     // At = Aᵀ  (3x12)
     float At[N_COLS * N_ROWS];
-    mat_transpose((float *)A, At, N_ROWS, N_COLS);
+    transpose_matrix((float *)A, At, N_ROWS, N_COLS);
 
     // AtA = Aᵀ * A  (3x3)
-    float AtA[N_COLS * N_COLS];
-    mat_multiply(At, (float *)A, AtA, N_COLS, N_ROWS, N_COLS);
+    float AtA[N_COLS][N_COLS];
+    multiply_matrix(At, (float *)A, AtA, N_COLS, N_ROWS, N_COLS);
 
     // Atb = Aᵀ * b  (3x1)
     float Atb[N_COLS];
-    mat_multiply(At, b, Atb, N_COLS, N_ROWS, 1);
+    multiply_matrix(At, b, Atb, N_COLS, N_ROWS, 1);
 
     // invert AtA
     float AtA_inv[N_COLS][N_COLS];
-    if (invert_3x3((float (*)[3])AtA, AtA_inv) != 0) {
+    if (invert_3x3_matrix((float (*)[3])AtA, AtA_inv) != 0) {
         pos[0] = pos[1] = pos[2] = 0.0f;
         return -1;
     }
 
     // pos = AtA_inv * Atb  (3x1)
-    mat_multiply((float *)AtA_inv, Atb, pos, N_COLS, N_COLS, 1);
+    multiply_matrix((float *)AtA_inv, Atb, pos, N_COLS, N_COLS, 1);
 
     return 0;
 }
