@@ -11,6 +11,6 @@ struct kalman_struct {
 
 extern struct k_msgq kalman_data_msgq;
 
-int calculate_kalman(int8_t value, float *out);
+int calculate_kalman(int8_t value, int8_t* out);
 
 #endif /* KALMAN_H */
