@@ -7,6 +7,7 @@ target_sources(app PRIVATE
   src/main.c
   src/central.c
   src/parse.c
+  src/shell.c
   lib/kalman.c
   lib/least_squares.c
 )

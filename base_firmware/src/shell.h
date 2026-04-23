@@ -23,9 +23,10 @@ extern sys_slist_t beacon_list;
 
 /* Functions */
 struct ibeacon_node *beacon_find(const char *name);
-int beacon_add(const char *name, const char *mac, uint16_t major, uint16_t minor,
-               float x, float y, const char *left, const char *right);
+int beacon_add(const char *name, const char *mac, uint16_t major, uint16_t minor, float x, float y,
+               const char *left, const char *right);
 int beacon_remove(const char *name);
 void beacon_print(struct ibeacon_node *node);
+int get_beacons_coords(float coords[][3], int max_beacons);
 
 #endif /* BEACON_H */

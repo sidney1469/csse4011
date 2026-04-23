@@ -1,12 +1,13 @@
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/slist.h>
+#include <stdlib.h>
 
 /* Ibeacon node structure */
 struct ibeacon_node {
     sys_snode_t node;
     char name[32];
-    char mac[18];       // "XX:XX:XX:XX:XX:XX"
+    char mac[18]; // "XX:XX:XX:XX:XX:XX"
     uint16_t major;
     uint16_t minor;
     float x;
@@ -27,18 +28,19 @@ static int cmd_beacon_add(const struct shell *sh, size_t argc, char **argv)
         return -ENOMEM;
     }
 
-    strncpy(node->name,            argv[1], sizeof(node->name) - 1);
-    strncpy(node->mac,             argv[2], sizeof(node->mac) - 1);
+    strncpy(node->name, argv[1], sizeof(node->name) - 1);
+    strncpy(node->mac, argv[2], sizeof(node->mac) - 1);
     node->major = atoi(argv[3]);
     node->minor = atoi(argv[4]);
-    node->x     = atof(argv[5]);
-    node->y     = atof(argv[6]);
-    node->z     = atof(argv[7]);
-    strncpy(node->left_neighbour,  argv[8], sizeof(node->left_neighbour) - 1);
+    node->x = atof(argv[5]);
+    node->y = atof(argv[6]);
+    node->z = atof(argv[7]);
+    strncpy(node->left_neighbour, argv[8], sizeof(node->left_neighbour) - 1);
     strncpy(node->right_neighbour, argv[9], sizeof(node->right_neighbour) - 1);
 
     sys_slist_append(&beacon_list, &node->node);
-    shell_print(sh, "Added beacon: %s at (%.1f, %.1f)", node->name, node->x, node->y);
+    shell_print(sh, "Added beacon: %s at (%.1f, %.1f, %.1f)", node->name, (double)node->x,
+                (double)node->y, (double)node->z);
 
     return 0;
 }
@@ -76,31 +78,58 @@ static int cmd_beacon_view(const struct shell *sh, size_t argc, char **argv)
             shell_print(sh, "MAC:     %s", node->mac);
             shell_print(sh, "Major:   %d", node->major);
             shell_print(sh, "Minor:   %d", node->minor);
-            shell_print(sh, "Pos:     (%.1f, %.1f)", node->x, node->y);
+            shell_print(sh, "Pos:     (%.1f, %.1f, %.1f)", (double)node->x, (double)node->y,
+                        (double)node->z);
             shell_print(sh, "Left:    %s", node->left_neighbour);
             shell_print(sh, "Right:   %s", node->right_neighbour);
 
-            if (!view_all) return 0;
+            if (!view_all) {
+                return 0;
+            }
         }
     }
 
     return 0;
 }
 
-SHELL_STATIC_SUBCMD_SET_CREATE(sub_beacon,
+int get_beacons_coords(float coords[][3], int max_beacons)
+{
+    for (int i = 0; i < max_beacons; i++) {
+        coords[i][0] = coords[i][1] = coords[i][2] = -1.0f;
+    }
+
+    struct ibeacon_node *node;
+    int found = 0;
+
+    SYS_SLIST_FOR_EACH_CONTAINER(&beacon_list, node, node) {
+        int idx = node->name[5] - 'A';
+        if (idx < 0 || idx >= max_beacons) {
+            continue;
+        }
+
+        coords[idx][0] = node->x;
+        coords[idx][1] = node->y;
+        coords[idx][2] = node->z;
+        found++;
+    }
+
+    return found;
+}
+
+SHELL_STATIC_SUBCMD_SET_CREATE(
+    sub_beacon,
     SHELL_CMD_ARG(add, NULL,
-        "Add ibeacon node.\n"
-        "Usage: beacon add <name> <mac> <major> <minor> <x> <y> <left> <right>",
-        cmd_beacon_add, 9, 0),
+                  "Add ibeacon node.\n"
+                  "Usage: beacon add <name> <mac> <major> <minor> <x> <y> <left> <right>",
+                  cmd_beacon_add, 9, 0),
     SHELL_CMD_ARG(remove, NULL,
-        "Remove ibeacon node.\n"
-        "Usage: beacon remove <name>",
-        cmd_beacon_remove, 2, 0),
+                  "Remove ibeacon node.\n"
+                  "Usage: beacon remove <name>",
+                  cmd_beacon_remove, 2, 0),
     SHELL_CMD_ARG(view, NULL,
-        "View ibeacon node(s).\n"
-        "Usage: beacon view <name> | beacon view -a",
-        cmd_beacon_view, 2, 0),
-    SHELL_SUBCMD_SET_END
-);
+                  "View ibeacon node(s).\n"
+                  "Usage: beacon view <name> | beacon view -a",
+                  cmd_beacon_view, 2, 0),
+    SHELL_SUBCMD_SET_END);
 
 SHELL_CMD_REGISTER(beacon, &sub_beacon, "Ibeacon node management", NULL);
