@@ -16,11 +16,14 @@
 
 static const struct json_obj_descr data_send_descr[] = {
     JSON_OBJ_DESCR_ARRAY(struct data_send, data_buffer, NUS_MAX_DATA_LEN, data_len, JSON_TOK_INT),
-    JSON_OBJ_DESCR_PRIM(struct data_send, pos_x, JSON_TOK_NUMBER),
-    JSON_OBJ_DESCR_PRIM(struct data_send, pos_y, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_PRIM(struct data_send, raw_pos_x, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_PRIM(struct data_send, raw_pos_y, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_PRIM(struct data_send, filtered_pos_x, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_PRIM(struct data_send, filtered_pos_y, JSON_TOK_NUMBER),
 };
 
-void parse_data_into_json(struct bt_data_received data, float pos[N_AXIS])
+void parse_data_into_json(struct bt_data_received data, float raw_pos[N_AXIS],
+                          float filtered_pos[N_AXIS])
 {
     struct data_send send;
     char buffer[256];
@@ -28,8 +31,10 @@ void parse_data_into_json(struct bt_data_received data, float pos[N_AXIS])
     memcpy(send.data_buffer, data.data_buffer, sizeof(send.data_buffer));
 
     send.data_len = data.data_len;
-    send.pos_x = (int32_t)(pos[0] * 100);
-    send.pos_y = (int32_t)(pos[1] * 100);
+    send.raw_pos_x = (int32_t)(raw_pos[0] * 100);
+    send.raw_pos_y = (int32_t)(raw_pos[1] * 100);
+    send.filtered_pos_x = (int32_t)(filtered_pos[0] * 100);
+    send.filtered_pos_y = (int32_t)(filtered_pos[1] * 100);
 
     json_obj_encode_buf(data_send_descr, ARRAY_SIZE(data_send_descr), &send, buffer,
                         sizeof(buffer));
@@ -41,7 +46,8 @@ void parse_thread(void *a, void *b, void *c)
     struct bt_data_received data;
 
     float coords[N_BEACONS][N_AXIS];
-    float pos[N_AXIS];
+    float raw_pos[N_AXIS];
+    float filtered_pos[N_AXIS];
 
     bool filter_initialised = false;
     int64_t last_time_ms = k_uptime_get();
@@ -63,26 +69,27 @@ void parse_thread(void *a, void *b, void *c)
             }
         }
 
-        int beacons_used = localise(coords, data.data_buffer, MEASURED_POWER, PATH_LOSS_EXP, pos);
+        int beacons_used =
+            localise(coords, data.data_buffer, MEASURED_POWER, PATH_LOSS_EXP, raw_pos);
 
-        if (beacons_used == -1 || (isnan(pos[0]) || isnan(pos[1]))) {
+        if (beacons_used == -1 || (isnan(raw_pos[0]) || isnan(raw_pos[1]))) {
             printk("Localisation failed\n");
             continue;
         } else {
             printk("Localisation successful. Estimated position using %d nodes\n", beacons_used);
 
             if (filter_initialised) {
-                printk("Raw position:    (%.2f, %.2f)\n", (double)pos[0], (double)pos[1]);
+                printk("Raw position:    (%.2f, %.2f)\n", (double)raw_pos[0], (double)raw_pos[1]);
                 kalman_predict(dt);
-                kalman_update(pos[0], pos[1]);
-                kalman_get_position(&pos[0], &pos[1]);
-                printk("Kalman position: (%.2f, %.2f)\n", (double)pos[0], (double)pos[1]);
+                kalman_update(raw_pos[0], raw_pos[1]);
+                kalman_get_position(&filtered_pos[0], &filtered_pos[1]);
+                printk("Kalman position: (%.2f, %.2f)\n", (double)filtered_pos[0],
+                       (double)filtered_pos[1]);
+                parse_data_into_json(data, raw_pos, filtered_pos);
             } else {
-                init_filter(pos[0], pos[1]);
+                init_filter(raw_pos[0], raw_pos[1]);
                 filter_initialised = true;
             }
         }
-
-        parse_data_into_json(data, pos);
     }
 }

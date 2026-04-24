@@ -18,10 +18,13 @@ void build_Ab(float beacon_coords[][N_AXIS], float displacements[N_BEACONS], flo
         float yi = beacon_coords[i][1];
         float ri = displacements[i];
 
-        A[i][0] = 2.0f * (xk - xi);
-        A[i][1] = 2.0f * (yk - yi);
+        // Apply weighted matrix
+        float w = 1.0f / fmaxf(ri * ri, 1e-4f);
 
-        b[i] = ri * ri - rk * rk - xi * xi + xk * xk - yi * yi + yk * yk;
+        A[i][0] = w * 2.0f * (xk - xi);
+        A[i][1] = w * 2.0f * (yk - yi);
+
+        b[i] = w * (ri * ri - rk * rk - xi * xi + xk * xk - yi * yi + yk * yk);
     }
 }
 

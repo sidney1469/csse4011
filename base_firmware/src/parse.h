@@ -13,8 +13,10 @@ void parse_thread(void *a, void *b, void *c);
 struct data_send {
     int8_t data_buffer[NUS_MAX_DATA_LEN];
     size_t data_len;
-    int32_t pos_x; // (float * 100)
-    int32_t pos_y;
+    int32_t raw_pos_x; // (float * 100)
+    int32_t raw_pos_y;
+    int32_t filtered_pos_x;
+    int32_t filtered_pos_y;
 };
 
 #endif /* CENTRAL_H */
