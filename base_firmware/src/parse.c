@@ -43,24 +43,19 @@ void parse_thread(void *a, void *b, void *c)
     struct bt_data_received data;
 
     float coords[N_BEACONS][N_AXIS];
-    float smoothed[N_BEACONS];
     float pos[N_AXIS];
-    int8_t filtered;
 
     while (1) {
         k_msgq_get(&bt_data_msgq, &data, K_FOREVER);
         get_beacons_coords(coords, N_BEACONS);
 
         for (int i = 0; i < N_BEACONS; i++) {
-            if (coords[i][0] == -1.0f || data.data_buffer[i] == 0) {
-                smoothed[i] = NAN;
-            } else {
-                calculate_kalman(i, data.data_buffer[i], &filtered);
-                smoothed[i] = (float)filtered;
+            if (coords[i][0] == -1.0f) {
+                data.data_buffer[i] = 0;
             }
         }
 
-        int beacons_used = localise(coords, smoothed, MEASURED_POWER, PATH_LOSS_EXP, pos);
+        int beacons_used = localise(coords, data.data_buffer, MEASURED_POWER, PATH_LOSS_EXP, pos);
         if (beacons_used == -1) {
             printk("Localisation failed\n");
             continue;

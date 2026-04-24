@@ -107,7 +107,7 @@ float rssi_to_distance(float rssi, float measured_power, float path_loss_exp)
     return powf(10.0f, (measured_power - rssi) / (10.0f * path_loss_exp));
 }
 
-int localise(float beacon_coords[N_BEACONS][N_AXIS], float rssi[N_BEACONS], float measured_power,
+int localise(float beacon_coords[N_BEACONS][N_AXIS], int8_t rssi[N_BEACONS], float measured_power,
              float path_loss_exp, float pos[N_AXIS])
 {
     float valid_coords[N_BEACONS][N_AXIS];
@@ -115,13 +115,14 @@ int localise(float beacon_coords[N_BEACONS][N_AXIS], float rssi[N_BEACONS], floa
     int valid_count = 0;
 
     for (int i = 0; i < N_BEACONS; i++) {
-        if (isnan(rssi[i]) || rssi[i] >= 0.0f || rssi[i] < -100.0f) {
+        if (rssi[i] >= 0 || rssi[i] < -110) {
             continue;
         }
         valid_coords[valid_count][0] = beacon_coords[i][0];
         valid_coords[valid_count][1] = beacon_coords[i][1];
         valid_coords[valid_count][2] = beacon_coords[i][2];
-        displacements[valid_count] = rssi_to_distance(rssi[i], measured_power, path_loss_exp);
+        displacements[valid_count] =
+            rssi_to_distance((float)rssi[i], measured_power, path_loss_exp);
         valid_count++;
     }
 
