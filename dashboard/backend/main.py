@@ -8,12 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 BAUD_RATE = 115200
-SERIAL_PORT = "/dev/ttyACM1"
+SERIAL_PORT = "/dev/ttyACM0"
 
 NUM_NODES = 13
-NODE_NAMES = ["NODE_A", "NODE_B", "NODE_C", "NODE_D", "NODE_E",
-              "NODE_F", "NODE_G", "NODE_H", "NODE_I", "NODE_J",
-              "NODE_K", "NODE_L", "NODE_M"]
+NODE_NAMES = ['4011-A','4011-B','4011-C','4011-D','4011-E','4011-F',
+                    '4011-G','4011-H','4011-I','4011-J','4011-K','4011-L','4011-M']
 
 MEAS_POWER = -56
 PATH_LOSS_EXP = 2.5
