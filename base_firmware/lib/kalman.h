@@ -1,8 +1,11 @@
 #ifndef KALMAN_H
 #define KALMAN_H
 
-#include <zephyr/types.h>
+#include "matrix.h"
 
-int calculate_kalman(int beacon_idx, int8_t value, int8_t *out);
+void init_filter(float x0, float y0, float z0);
+void kalman_predict(float dt);
+void kalman_update(float x_meas, float y_meas, float z_meas);
+void kalman_get_position(float *x, float *y, float *z);
 
 #endif

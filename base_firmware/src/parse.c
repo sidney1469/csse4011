@@ -10,8 +10,8 @@
 
 #include "parse.h"
 #include "central.h"
-#include "kalman.h"
 #include "shell.h"
+#include "kalman.h"
 #include "least_squares.h"
 
 static const struct json_obj_descr data_send_descr[] = {
@@ -45,8 +45,18 @@ void parse_thread(void *a, void *b, void *c)
     float coords[N_BEACONS][N_AXIS];
     float pos[N_AXIS];
 
+    bool filter_initialised = false;
+    int64_t last_time_ms = k_uptime_get();
+    int64_t curr_time_ms;
+    float dt;
+
     while (1) {
         k_msgq_get(&bt_data_msgq, &data, K_FOREVER);
+
+        curr_time_ms = k_uptime_get();
+        dt = (curr_time_ms - last_time_ms) / 1000.0f;
+        last_time_ms = curr_time_ms;
+
         get_beacons_coords(coords, N_BEACONS);
 
         for (int i = 0; i < N_BEACONS; i++) {
@@ -56,11 +66,25 @@ void parse_thread(void *a, void *b, void *c)
         }
 
         int beacons_used = localise(coords, data.data_buffer, MEASURED_POWER, PATH_LOSS_EXP, pos);
+
         if (beacons_used == -1) {
             printk("Localisation failed\n");
             continue;
         } else {
-            printk("Localisation succesful. Estimated position using %d nodes\n", beacons_used);
+            printk("Localisation successful. Estimated position using %d nodes\n", beacons_used);
+
+            if (filter_initialised) {
+                printk("Raw position:    (%.2f, %.2f, %.2f)\n", (double)pos[0], (double)pos[1],
+                       (double)pos[2]);
+                kalman_predict(dt);
+                kalman_update(pos[0], pos[1], pos[2]);
+                kalman_get_position(&pos[0], &pos[1], &pos[2]);
+                printk("Kalman position: (%.2f, %.2f, %.2f)\n", (double)pos[0], (double)pos[1],
+                       (double)pos[2]);
+            } else {
+                init_filter(pos[0], pos[1], pos[2]);
+                filter_initialised = true;
+            }
         }
 
         parse_data_into_json(data, pos);
