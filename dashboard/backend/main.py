@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 BAUD_RATE = 115200
-SERIAL_PORT = "/dev/ttyACM0"
+SERIAL_PORT = "/dev/tty.usbmodem1101"
 
 NUM_NODES = 13
 NODE_NAMES = ['4011-A','4011-B','4011-C','4011-D','4011-E','4011-F',

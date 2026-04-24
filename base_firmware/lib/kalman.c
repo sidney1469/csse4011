@@ -2,10 +2,9 @@
 #include <math.h>
 #include "kalman.h"
 
-#define N_BEACONS 13
-#define Q_POS     0.1f  // higher = trust motion model less
-#define Q_VEL     0.01f // lower = trust motion model more
-#define R         2.0f  // measurement noise variance (units: m²)
+#define Q_POS 0.05f
+#define Q_VEL 5.0f
+#define R     20.0f // measurement noise variance (units: m²)
 
 static float X[6];
 static float P[6][6];
@@ -20,8 +19,8 @@ void init_filter(float x0, float y0, float z0)
     memset(P, 0, sizeof(P));
 
     // Set initial uncertainty (Can be toggled)
-    P[0][0] = P[1][1] = P[2][2] = 1.0f;  // position
-    P[3][3] = P[4][4] = P[5][5] = 10.0f; // velocity
+    P[0][0] = P[1][1] = P[2][2] = 1.0f; // position
+    P[3][3] = P[4][4] = P[5][5] = 0.1f; // velocity
 }
 
 void kalman_predict(float dt)

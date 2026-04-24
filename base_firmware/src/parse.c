@@ -67,7 +67,7 @@ void parse_thread(void *a, void *b, void *c)
 
         int beacons_used = localise(coords, data.data_buffer, MEASURED_POWER, PATH_LOSS_EXP, pos);
 
-        if (beacons_used == -1) {
+        if (beacons_used == -1 || (isnan(pos[0]) || isnan(pos[1]) || isnan(pos[2]))) {
             printk("Localisation failed\n");
             continue;
         } else {
