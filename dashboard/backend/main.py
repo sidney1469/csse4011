@@ -12,7 +12,7 @@ SERIAL_PORT = "/dev/tty.usbmodem1101"
 
 NUM_NODES = 13
 NODE_NAMES = ['4011-A','4011-B','4011-C','4011-D','4011-E','4011-F',
-                    '4011-G','4011-H','4011-I','4011-J','4011-K','4011-L','4011-M']
+              '4011-G','4011-H','4011-I','4011-J','4011-K','4011-L','4011-M']
 
 MEAS_POWER = -56
 PATH_LOSS_EXP = 2.5
@@ -29,12 +29,8 @@ app.add_middleware(
 
 clients: set[WebSocket] = set()
 ser: serial.Serial = None
-
-# In-memory beacon registry — populated from device on connect
 beacon_registry: dict[str, dict] = {}
 
-
-# ── Models ────────────────────────────────────────────────────────────────────
 
 class Node(BaseModel):
     name: str
@@ -43,12 +39,9 @@ class Node(BaseModel):
     minor: int
     x: float
     y: float
-    z: float
     left: str = ""
     right: str = ""
 
-
-# ── Path loss ─────────────────────────────────────────────────────────────────
 
 def rssi_to_distance(rssi: int) -> float:
     if rssi == 0:
@@ -56,56 +49,40 @@ def rssi_to_distance(rssi: int) -> float:
     return round(10 ** ((MEAS_POWER - rssi) / (10 * PATH_LOSS_EXP)), 2)
 
 
-# ── Beacon view parser ────────────────────────────────────────────────────────
-# Accumulates the multi-line shell output from "beacon view -a" into records.
-#
-# Expected block per beacon:
-#   ----------------------------
-#   Name:    4011-A
-#   MAC:     F5:75:FE:85:34:67
-#   Major:   2753
-#   Minor:   32998
-#   Pos:     (0.0, 0.0, 1.0)
-#   Left:
-#   Right:   4011-B
-
 class BeaconViewParser:
     def __init__(self):
         self._current: dict = {}
-        self._complete: list[dict] = []
 
     def feed(self, line: str) -> list[dict]:
-        """Feed one decoded serial line. Returns list of completed beacon dicts (usually empty)."""
         completed = []
 
         if line.startswith("---"):
-            # Separator — if we have a partial record, discard it (shouldn't happen)
+            if "name" in self._current:
+                completed.append(dict(self._current))
             self._current = {}
-            return []
+            return completed
 
         def field(prefix):
             if line.startswith(prefix):
                 return line[len(prefix):].strip()
             return None
 
-        if (v := field("Name:"))    is not None: self._current["name"]  = v
-        if (v := field("MAC:"))     is not None: self._current["mac"]   = v
-        if (v := field("Major:"))   is not None: self._current["major"] = int(v)
-        if (v := field("Minor:"))   is not None: self._current["minor"] = int(v)
-        if (v := field("Left:"))    is not None: self._current["left"]  = v
-        if (v := field("Right:"))   is not None:
+        if (v := field("Name:"))  is not None: self._current["name"]  = v
+        if (v := field("MAC:"))   is not None: self._current["mac"]   = v
+        if (v := field("Major:")) is not None: self._current["major"] = int(v)
+        if (v := field("Minor:")) is not None: self._current["minor"] = int(v)
+        if (v := field("Left:"))  is not None: self._current["left"]  = v
+        if (v := field("Right:")) is not None:
             self._current["right"] = v
-            # "Right" is the last field in the block — record is complete
             if "name" in self._current:
                 completed.append(dict(self._current))
                 self._current = {}
 
         if (v := field("Pos:")) is not None:
-            m = re.match(r"\(\s*([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)\s*\)", v)
+            m = re.match(r"\(\s*([-\d.]+),\s*([-\d.]+)(?:,\s*([-\d.]+))?\s*\)", v)
             if m:
                 self._current["x"] = float(m.group(1))
                 self._current["y"] = float(m.group(2))
-                self._current["z"] = float(m.group(3))
 
         return completed
 
@@ -113,14 +90,12 @@ class BeaconViewParser:
 _beacon_parser = BeaconViewParser()
 
 
-# ── REST endpoints ────────────────────────────────────────────────────────────
-
 @app.post("/add_node")
 async def add_node(node: Node):
     if ser is None:
         raise HTTPException(status_code=503, detail="Serial port not open")
     cmd = (f"beacon add {node.name} {node.mac} {node.major} {node.minor} "
-           f"{node.x} {node.y} {node.z} {node.left} {node.right}\n")
+           f"{node.x} {node.y} {node.left} {node.right}\n")
     ser.write(cmd.encode())
     beacon_registry[node.name] = node.dict()
     return {"status": "ok"}
@@ -153,7 +128,6 @@ async def view_all_nodes():
 
 @app.get("/beacon_registry")
 async def get_beacon_registry():
-    """Return the in-memory beacon registry (populated from device on connect)."""
     return {"beacons": list(beacon_registry.values())}
 
 
@@ -179,15 +153,12 @@ async def set_config(body: dict):
     return {"status": "ok", "meas_power": MEAS_POWER, "path_loss_exp": PATH_LOSS_EXP}
 
 
-# ── WebSocket ─────────────────────────────────────────────────────────────────
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     clients.add(websocket)
     print(f"Client connected — {len(clients)} total")
 
-    # Send whatever we already know immediately so the UI populates on reconnect
     if beacon_registry:
         try:
             await websocket.send_text(json.dumps({
@@ -205,8 +176,6 @@ async def websocket_endpoint(websocket: WebSocket):
         clients.discard(websocket)
         print(f"Client disconnected — {len(clients)} total")
 
-
-# ── Packet / line parsing ─────────────────────────────────────────────────────
 
 def parse_packet(line: str) -> dict | None:
     try:
@@ -234,7 +203,6 @@ def parse_packet(line: str) -> dict | None:
             "position": {
                 "x": raw.get("pos_x", 0) / 100.0,
                 "y": raw.get("pos_y", 0) / 100.0,
-                "z": raw.get("pos_z", 0) / 100.0,
             },
         }
     except (json.JSONDecodeError, KeyError, TypeError) as e:
@@ -252,10 +220,7 @@ async def broadcast(message: str):
     clients.difference_update(disconnected)
 
 
-# ── Serial reader ─────────────────────────────────────────────────────────────
-
 async def query_beacons_after_delay(delay: float = 1.5):
-    """Wait for the shell to be ready then request all beacon data."""
     await asyncio.sleep(delay)
     if ser and ser.is_open:
         print("Querying beacon list from device...")
@@ -290,18 +255,15 @@ async def serial_reader():
                     continue
                 print(f"Raw: {decoded_line}")
 
-                # Try beacon view parser first (shell text lines)
                 completed = _beacon_parser.feed(decoded_line)
                 for beacon in completed:
                     beacon_registry[beacon["name"]] = beacon
-                    print(f"  → Registered beacon: {beacon['name']} at "
-                          f"({beacon['x']}, {beacon['y']}, {beacon['z']})")
+                    print(f"  → Registered beacon: {beacon['name']} at ({beacon['x']}, {beacon['y']})")
                     await broadcast(json.dumps({
                         "type": "beacon_list",
                         "beacons": list(beacon_registry.values()),
                     }))
 
-                # Try JSON RSSI packet
                 packet = parse_packet(decoded_line)
                 if packet:
                     await broadcast(json.dumps(packet))

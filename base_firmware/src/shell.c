@@ -12,7 +12,6 @@ struct ibeacon_node {
     uint16_t minor;
     float x;
     float y;
-    float z;
     char left_neighbour[32];
     char right_neighbour[32];
 };
@@ -24,23 +23,22 @@ static const struct {
     uint16_t minor;
     float x;
     float y;
-    float z;
     char left_neighbour[32];
     char right_neighbour[32];
 } defaults[13] = {
-    {"4011-A", "F5:75:FE:85:34:67", 2753, 32998, 0, 0, 1, "", "4011-B"},
-    {"4011-B", "E5:73:87:06:1E:86", 32975, 20959, 0, 1.7, 1, "4011-A", "4011-C"},
-    {"4011-C", "CA:99:9E:FD:98:B1", 26679, 40363, 0, 3.4, 1, "4011-B", "4011-D"},
-    {"4011-D", "CB:1B:89:82:FF:FE", 41747, 38800, 1.75, 3.4, 1, "4011-C", "4011-E"},
-    {"4011-E", "D4:D2:A0:A4:5C:AC", 30679, 51963, 3.5, 3.4, 1, "4011-D", "4011-F"},
-    {"4011-F", "C1:13:27:E9:B7:7C", 6195, 18394, 5.25, 3.4, 1, "4011-E", "4011-G"},
-    {"4011-G", "F1:04:48:06:39:A0", 30525, 30544, 7, 3.4, 1, "4011-F", "4011-H"},
-    {"4011-H", "CA:0C:E0:DB:CE:60", 57395, 28931, 7, 1.7, 1, "4011-G", "4011-I"},
-    {"4011-I", "D4:7F:D4:7C:20:13", 60345, 49995, 7, 0, 1, "4011-H", "4011-J"},
-    {"4011-J", "F7:0B:21:F1:C8:E1", 12249, 30916, 5.25, 0, 1, "4011-I", "4011-K"},
-    {"4011-K", "FD:E0:8D:FA:3E:4A", 36748, 11457, 3.5, 0, 1, "4011-J", "4011-L"},
-    {"4011-L", "EE:32:F7:28:FA:AC", 27564, 27589, 1.75, 0, 1, "4011-K", "4011-A"},
-    {"4011-M", "F7:3B:46:A8:D7:2C", 49247, 52925, 3.5, 1.7, 2, "", ""},
+    {"4011-A", "F5:75:FE:85:34:67", 2753, 32998, 0, 0, "", "4011-B"},
+    {"4011-B", "E5:73:87:06:1E:86", 32975, 20959, 0, 1.7, "4011-A", "4011-C"},
+    {"4011-C", "CA:99:9E:FD:98:B1", 26679, 40363, 0, 3.4, "4011-B", "4011-D"},
+    {"4011-D", "CB:1B:89:82:FF:FE", 41747, 38800, 1.75, 3.4, "4011-C", "4011-E"},
+    {"4011-E", "D4:D2:A0:A4:5C:AC", 30679, 51963, 3.5, 3.4, "4011-D", "4011-F"},
+    {"4011-F", "C1:13:27:E9:B7:7C", 6195, 18394, 5.25, 3.4, "4011-E", "4011-G"},
+    {"4011-G", "F1:04:48:06:39:A0", 30525, 30544, 7, 3.4, "4011-F", "4011-H"},
+    {"4011-H", "CA:0C:E0:DB:CE:60", 57395, 28931, 7, 1.7, "4011-G", "4011-I"},
+    {"4011-I", "D4:7F:D4:7C:20:13", 60345, 49995, 7, 0, "4011-H", "4011-J"},
+    {"4011-J", "F7:0B:21:F1:C8:E1", 12249, 30916, 5.25, 0, "4011-I", "4011-K"},
+    {"4011-K", "FD:E0:8D:FA:3E:4A", 36748, 11457, 3.5, 0, "4011-J", "4011-L"},
+    {"4011-L", "EE:32:F7:28:FA:AC", 27564, 27589, 1.75, 0, "4011-K", "4011-A"},
+    {"4011-M", "F7:3B:46:A8:D7:2C", 49247, 52925, 3.5, 1.7, "", ""},
 };
 
 static sys_slist_t beacon_list = SYS_SLIST_STATIC_INIT(&beacon_list);
@@ -60,14 +58,13 @@ static int cmd_beacon_add(const struct shell *sh, size_t argc, char **argv)
     node->minor = atoi(argv[4]);
     node->x = atof(argv[5]);
     node->y = atof(argv[6]);
-    node->z = atof(argv[7]);
 
     strncpy(node->left_neighbour, argv[8], sizeof(node->left_neighbour) - 1);
     strncpy(node->right_neighbour, argv[9], sizeof(node->right_neighbour) - 1);
 
     sys_slist_append(&beacon_list, &node->node);
-    shell_print(sh, "Added beacon: %s at (%.1f, %.1f, %.1f)", node->name, (double)node->x,
-                (double)node->y, (double)node->z);
+    shell_print(sh, "Added beacon: %s at (%.1f, %.1f)", node->name, (double)node->x,
+                (double)node->y);
 
     return 0;
 }
@@ -105,8 +102,7 @@ static int cmd_beacon_view(const struct shell *sh, size_t argc, char **argv)
             shell_print(sh, "MAC:     %s", node->mac);
             shell_print(sh, "Major:   %d", node->major);
             shell_print(sh, "Minor:   %d", node->minor);
-            shell_print(sh, "Pos:     (%.1f, %.1f, %.1f)", (double)node->x, (double)node->y,
-                        (double)node->z);
+            shell_print(sh, "Pos:     (%.1f, %.1f)", (double)node->x, (double)node->y);
             shell_print(sh, "Left:    %s", node->left_neighbour);
             shell_print(sh, "Right:   %s", node->right_neighbour);
 
@@ -133,7 +129,6 @@ void init_default_beacons(void)
         node->minor = defaults[i].minor;
         node->x = defaults[i].x;
         node->y = defaults[i].y;
-        node->z = defaults[i].z;
         strncpy(node->left_neighbour, defaults[i].left_neighbour, sizeof(node->left_neighbour) - 1);
         strncpy(node->right_neighbour, defaults[i].right_neighbour,
                 sizeof(node->right_neighbour) - 1);
@@ -143,10 +138,10 @@ void init_default_beacons(void)
     printk("Beacon list initialised with 13 nodes\n");
 }
 
-int get_beacons_coords(float coords[][3], int max_beacons)
+int get_beacons_coords(float coords[][2], int max_beacons)
 {
     for (int i = 0; i < max_beacons; i++) {
-        coords[i][0] = coords[i][1] = coords[i][2] = -1.0f;
+        coords[i][0] = coords[i][1] = -1.0f;
     }
 
     struct ibeacon_node *node;
@@ -160,7 +155,6 @@ int get_beacons_coords(float coords[][3], int max_beacons)
 
         coords[idx][0] = node->x;
         coords[idx][1] = node->y;
-        coords[idx][2] = node->z;
         found++;
     }
 

@@ -24,11 +24,9 @@ void multiply_matrix(float *A, float *B, float *C, int rowsA, int colsA, int col
     }
 }
 
-int invert_3x3_matrix(float M[3][3], float inv[3][3])
+int invert_2x2_matrix(float M[2][2], float inv[2][2])
 {
-    float det = M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) -
-                M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0]) +
-                M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0]);
+    float det = M[0][0] * M[1][1] - M[0][1] * M[1][0];
 
     if (fabsf(det) < 1e-6f) {
         return -1;
@@ -36,15 +34,10 @@ int invert_3x3_matrix(float M[3][3], float inv[3][3])
 
     float inv_det = 1.0f / det;
 
-    inv[0][0] = (M[1][1] * M[2][2] - M[1][2] * M[2][1]) * inv_det;
-    inv[0][1] = -(M[0][1] * M[2][2] - M[0][2] * M[2][1]) * inv_det;
-    inv[0][2] = (M[0][1] * M[1][2] - M[0][2] * M[1][1]) * inv_det;
-    inv[1][0] = -(M[1][0] * M[2][2] - M[1][2] * M[2][0]) * inv_det;
-    inv[1][1] = (M[0][0] * M[2][2] - M[0][2] * M[2][0]) * inv_det;
-    inv[1][2] = -(M[0][0] * M[1][2] - M[0][2] * M[1][0]) * inv_det;
-    inv[2][0] = (M[1][0] * M[2][1] - M[1][1] * M[2][0]) * inv_det;
-    inv[2][1] = -(M[0][0] * M[2][1] - M[0][1] * M[2][0]) * inv_det;
-    inv[2][2] = (M[0][0] * M[1][1] - M[0][1] * M[1][0]) * inv_det;
+    inv[0][0] = M[1][1] * inv_det;
+    inv[0][1] = -M[0][1] * inv_det;
+    inv[1][0] = -M[1][0] * inv_det;
+    inv[1][1] = M[0][0] * inv_det;
 
     return 0;
 }

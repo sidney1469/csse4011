@@ -15,7 +15,6 @@ struct data_send {
     size_t data_len;
     int32_t pos_x; // (float * 100)
     int32_t pos_y;
-    int32_t pos_z;
 };
 
 #endif /* CENTRAL_H */

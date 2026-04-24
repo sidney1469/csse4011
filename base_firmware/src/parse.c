@@ -18,7 +18,6 @@ static const struct json_obj_descr data_send_descr[] = {
     JSON_OBJ_DESCR_ARRAY(struct data_send, data_buffer, NUS_MAX_DATA_LEN, data_len, JSON_TOK_INT),
     JSON_OBJ_DESCR_PRIM(struct data_send, pos_x, JSON_TOK_NUMBER),
     JSON_OBJ_DESCR_PRIM(struct data_send, pos_y, JSON_TOK_NUMBER),
-    JSON_OBJ_DESCR_PRIM(struct data_send, pos_z, JSON_TOK_NUMBER),
 };
 
 void parse_data_into_json(struct bt_data_received data, float pos[N_AXIS])
@@ -31,7 +30,6 @@ void parse_data_into_json(struct bt_data_received data, float pos[N_AXIS])
     send.data_len = data.data_len;
     send.pos_x = (int32_t)(pos[0] * 100);
     send.pos_y = (int32_t)(pos[1] * 100);
-    send.pos_z = (int32_t)(pos[2] * 100);
 
     json_obj_encode_buf(data_send_descr, ARRAY_SIZE(data_send_descr), &send, buffer,
                         sizeof(buffer));
@@ -67,22 +65,20 @@ void parse_thread(void *a, void *b, void *c)
 
         int beacons_used = localise(coords, data.data_buffer, MEASURED_POWER, PATH_LOSS_EXP, pos);
 
-        if (beacons_used == -1 || (isnan(pos[0]) || isnan(pos[1]) || isnan(pos[2]))) {
+        if (beacons_used == -1 || (isnan(pos[0]) || isnan(pos[1]))) {
             printk("Localisation failed\n");
             continue;
         } else {
             printk("Localisation successful. Estimated position using %d nodes\n", beacons_used);
 
             if (filter_initialised) {
-                printk("Raw position:    (%.2f, %.2f, %.2f)\n", (double)pos[0], (double)pos[1],
-                       (double)pos[2]);
+                printk("Raw position:    (%.2f, %.2f)\n", (double)pos[0], (double)pos[1]);
                 kalman_predict(dt);
-                kalman_update(pos[0], pos[1], pos[2]);
-                kalman_get_position(&pos[0], &pos[1], &pos[2]);
-                printk("Kalman position: (%.2f, %.2f, %.2f)\n", (double)pos[0], (double)pos[1],
-                       (double)pos[2]);
+                kalman_update(pos[0], pos[1]);
+                kalman_get_position(&pos[0], &pos[1]);
+                printk("Kalman position: (%.2f, %.2f)\n", (double)pos[0], (double)pos[1]);
             } else {
-                init_filter(pos[0], pos[1], pos[2]);
+                init_filter(pos[0], pos[1]);
                 filter_initialised = true;
             }
         }

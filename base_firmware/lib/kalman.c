@@ -3,134 +3,131 @@
 #include "kalman.h"
 
 #define Q_POS 0.05f
-#define Q_VEL 5.0f
-#define R     20.0f // measurement noise variance (units: m²)
+#define Q_VEL 0.001f
+#define R     2.0f // measurement noise variance (units: m²)
 
-static float X[6];
-static float P[6][6];
+static float X[4];
+static float P[4][4];
 
-void init_filter(float x0, float y0, float z0)
+void init_filter(float x0, float y0)
 {
     memset(X, 0, sizeof(X));
     X[0] = x0;
     X[1] = y0;
-    X[2] = z0;
 
     memset(P, 0, sizeof(P));
 
     // Set initial uncertainty (Can be toggled)
-    P[0][0] = P[1][1] = P[2][2] = 1.0f; // position
-    P[3][3] = P[4][4] = P[5][5] = 0.1f; // velocity
+    P[0][0] = P[1][1] = 1.0f; // position
+    P[2][2] = P[3][3] = 0.1f; // velocity
 }
 
 void kalman_predict(float dt)
 {
-    float F[6][6] = {
-        {1, 0, 0, dt, 0, 0}, {0, 1, 0, 0, dt, 0}, {0, 0, 1, 0, 0, dt},
-        {0, 0, 0, 1, 0, 0},  {0, 0, 0, 0, 1, 0},  {0, 0, 0, 0, 0, 1},
+    float F[4][4] = {
+        {1, 0, dt, 0},
+        {0, 1, 0, dt},
+        {0, 0, 1, 0},
+        {0, 0, 0, 1},
     };
 
     // State transition: F @ x
-    float X_temp[6];
-    multiply_matrix((float *)F, X, X_temp, 6, 6, 1);
-    for (int i = 0; i < 6; i++) {
+    float X_temp[4];
+    multiply_matrix((float *)F, X, X_temp, 4, 4, 1);
+    for (int i = 0; i < 4; i++) {
         X[i] = X_temp[i];
     }
     // P = F * P * F_T + Q
-    float F_T[6][6];
-    float FP[6][6];
-    float FPF_T[6][6];
+    float F_T[4][4];
+    float FP[4][4];
+    float FPF_T[4][4];
 
-    transpose_matrix((float *)F, (float *)F_T, 6, 6);
+    transpose_matrix((float *)F, (float *)F_T, 4, 4);
 
-    multiply_matrix((float *)F, (float *)P, (float *)FP, 6, 6, 6);
-    multiply_matrix((float *)FP, (float *)F_T, (float *)FPF_T, 6, 6, 6);
+    multiply_matrix((float *)F, (float *)P, (float *)FP, 4, 4, 4);
+    multiply_matrix((float *)FP, (float *)F_T, (float *)FPF_T, 4, 4, 4);
 
     // Write back into P and add Q
-    for (int i = 0; i < 6; i++) {
-        for (int j = 0; j < 6; j++) {
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
             P[i][j] = FPF_T[i][j];
         }
     }
 
     // Add process noise Q
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 2; i++) {
         P[i][i] += Q_POS;
-        P[i + 3][i + 3] += Q_VEL;
+        P[i + 2][i + 2] += Q_VEL;
     }
 }
 
-void kalman_update(float x_meas, float y_meas, float z_meas)
+void kalman_update(float x_meas, float y_meas)
 {
     // H: state-to-measurement matrix (3x6)
-    float H[3][6] = {
-        {1, 0, 0, 0, 0, 0},
-        {0, 1, 0, 0, 0, 0},
-        {0, 0, 1, 0, 0, 0},
+    float H[2][4] = {
+        {1, 0, 0, 0},
+        {0, 1, 0, 0},
     };
 
     // Innovation: y = z - H*x
-    float HX[3];
-    multiply_matrix((float *)H, X, HX, 3, 6, 1);
-    float y[3] = {
+    float HX[2];
+    multiply_matrix((float *)H, X, HX, 2, 4, 1);
+    float y[2] = {
         x_meas - HX[0],
         y_meas - HX[1],
-        z_meas - HX[2],
     };
 
     // S = H*P*Hᵀ + R*I
-    float H_T[6][3];
-    float HP[3][6];
-    float HPH_T[3][3];
+    float H_T[4][2];
+    float HP[2][4];
+    float HPH_T[2][2];
 
-    transpose_matrix((float *)H, (float *)H_T, 3, 6);
-    multiply_matrix((float *)H, (float *)P, (float *)HP, 3, 6, 6);
-    multiply_matrix((float *)HP, (float *)H_T, (float *)HPH_T, 3, 6, 3);
+    transpose_matrix((float *)H, (float *)H_T, 2, 4);
+    multiply_matrix((float *)H, (float *)P, (float *)HP, 2, 4, 4);
+    multiply_matrix((float *)HP, (float *)H_T, (float *)HPH_T, 2, 4, 4);
 
     // Add R on diagonal
     HPH_T[0][0] += R;
     HPH_T[1][1] += R;
-    HPH_T[2][2] += R;
 
     // S_inv = invert(S)
-    float S_inv[3][3];
-    if (invert_3x3_matrix(HPH_T, S_inv) != 0) {
+    float S_inv[2][2];
+    if (invert_2x2_matrix(HPH_T, S_inv) != 0) {
         return; // singular, skip update
     }
 
     // K = P*Hᵀ*S_inv  (6x3 Kalman gain)
-    float PH_T[6][3];
-    float K[6][3];
+    float PH_T[4][2];
+    float K[4][2];
 
-    multiply_matrix((float *)P, (float *)H_T, (float *)PH_T, 6, 6, 3);
-    multiply_matrix((float *)PH_T, (float *)S_inv, (float *)K, 6, 3, 3);
+    multiply_matrix((float *)P, (float *)H_T, (float *)PH_T, 4, 4, 2);
+    multiply_matrix((float *)PH_T, (float *)S_inv, (float *)K, 4, 2, 2);
 
     // x = x + K*y
-    float Ky[6];
-    multiply_matrix((float *)K, y, Ky, 6, 3, 1);
-    for (int i = 0; i < 6; i++) {
+    float Ky[4];
+    multiply_matrix((float *)K, y, Ky, 4, 2, 1);
+    for (int i = 0; i < 4; i++) {
         X[i] += Ky[i];
     }
 
     // P = (I - K*H) * P
-    float KH[6][6];
-    float I_KH[6][6];
-    multiply_matrix((float *)K, (float *)H, (float *)KH, 6, 3, 6);
+    float KH[4][4];
+    float I_KH[4][4];
+    multiply_matrix((float *)K, (float *)H, (float *)KH, 4, 2, 4);
 
-    for (int i = 0; i < 6; i++) {
-        for (int j = 0; j < 6; j++) {
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
             I_KH[i][j] = (i == j ? 1.0f : 0.0f) - KH[i][j];
         }
     }
 
-    float P_new[6][6];
-    multiply_matrix((float *)I_KH, (float *)P, (float *)P_new, 6, 6, 6);
+    float P_new[4][4];
+    multiply_matrix((float *)I_KH, (float *)P, (float *)P_new, 4, 4, 4);
     memcpy(P, P_new, sizeof(P));
 }
 
-void kalman_get_position(float *x, float *y, float *z)
+void kalman_get_position(float *x, float *y)
 {
     *x = X[0];
     *y = X[1];
-    *z = X[2];
 }
