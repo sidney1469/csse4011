@@ -1,5 +1,5 @@
 sample:
-  name: Bluetooth Central
+  name: base_node
 tests:
   sample.bluetooth.central:
     harness: bluetooth
