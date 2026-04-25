@@ -2,9 +2,8 @@
 #include <math.h>
 #include "kalman.h"
 
-#define Q_POS 0.05f
-#define Q_VEL 0.001f
-#define R     2.0f // measurement noise variance (units: m²)
+#define Q 0.1f
+#define R 2.0f
 
 static float X[4];
 static float P[4][4];
@@ -55,10 +54,21 @@ void kalman_predict(float dt)
     }
 
     // Add process noise Q
-    for (int i = 0; i < 2; i++) {
-        P[i][i] += Q_POS;
-        P[i + 2][i + 2] += Q_VEL;
-    }
+    float dt2 = dt * dt;
+    float dt3 = dt2 * dt;
+    float dt4 = dt2 * dt2;
+
+    // Position-position
+    P[0][0] += Q * dt4 / 4.0f;
+    P[1][1] += Q * dt4 / 4.0f;
+    // Velocity-velocity
+    P[2][2] += Q * dt2;
+    P[3][3] += Q * dt2;
+    // Position-velocity cross terms
+    P[0][2] += Q * dt3 / 2.0f;
+    P[2][0] += Q * dt3 / 2.0f;
+    P[1][3] += Q * dt3 / 2.0f;
+    P[3][1] += Q * dt3 / 2.0f;
 }
 
 void kalman_update(float x_meas, float y_meas)
@@ -69,7 +79,7 @@ void kalman_update(float x_meas, float y_meas)
         {0, 1, 0, 0},
     };
 
-    // Innovation: y = z - H*x
+    // y = z - H*x
     float HX[2];
     multiply_matrix((float *)H, X, HX, 2, 4, 1);
     float y[2] = {
@@ -110,20 +120,41 @@ void kalman_update(float x_meas, float y_meas)
         X[i] += Ky[i];
     }
 
-    // P = (I - K*H) * P
+    // P = IKH * P * IKH_T + K * R * K_T
     float KH[4][4];
-    float I_KH[4][4];
     multiply_matrix((float *)K, (float *)H, (float *)KH, 4, 2, 4);
 
+    float I_KH[4][4];
+    float I_KH_T[4][4];
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
             I_KH[i][j] = (i == j ? 1.0f : 0.0f) - KH[i][j];
         }
     }
+    transpose_matrix((float *)I_KH, (float *)I_KH_T, 4, 4);
 
-    float P_new[4][4];
-    multiply_matrix((float *)I_KH, (float *)P, (float *)P_new, 4, 4, 4);
-    memcpy(P, P_new, sizeof(P));
+    float IKHP[4][4];
+    float IKHPIKH_T[4][4];
+    multiply_matrix((float *)I_KH, (float *)P, (float *)IKHP, 4, 4, 4);
+    multiply_matrix((float *)IKHP, (float *)I_KH_T, (float *)IKHPIKH_T, 4, 4, 4);
+
+    float K_T[2][4];
+    transpose_matrix((float *)K, (float *)K_T, 4, 2);
+
+    float KR[4][2];
+    float KRK_T[4][4];
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 2; j++) {
+            KR[i][j] = K[i][j] * R;
+        }
+    }
+    multiply_matrix((float *)KR, (float *)K_T, (float *)KRK_T, 4, 2, 4);
+
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            P[i][j] = IKHPIKH_T[i][j] + KRK_T[i][j];
+        }
+    }
 }
 
 void kalman_get_position(float *x, float *y)
