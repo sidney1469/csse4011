@@ -50,7 +50,7 @@ void build_Ab(float beacon_coords[][N_AXIS], float displacements[N_BEACONS], flo
         float yi = coords_copy[i][1];
         float ri = disp_copy[i];
 
-        // solve:
+        // the weighted least squares has us solve:
         //                           x = (A_T W A)^-1 A_T W b
         //                 (A_T W A) x = A_T W b
         //  (A_T sqrt[W])(sqrt[W] A) x = (A_T sqrt[W])(sqrt[W] b)
