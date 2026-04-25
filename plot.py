@@ -6,36 +6,16 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
 SERIAL_PORT = "/dev/ttyACM0"
-BAUD_RATE = 115200
-HISTORY = 100
-MA_WINDOW = 100
+BAUD_RATE   = 115200
+HISTORY     = 200
 
-NODE_NAMES = [
-    '4011-A','4011-B','4011-C','4011-D','4011-E','4011-F','4011-G',
-    '4011-H','4011-I','4011-J','4011-K','4011-L','4011-M'
-]
-N = len(NODE_NAMES)
-
-buffers    = [collections.deque([None] * HISTORY, maxlen=HISTORY) for _ in range(N)]
-ma_buffers = [collections.deque([None] * HISTORY, maxlen=HISTORY) for _ in range(N)]
-ma_windows = [collections.deque(maxlen=MA_WINDOW) for _ in range(N)]
+raw_x      = collections.deque([float("nan")] * HISTORY, maxlen=HISTORY)
+raw_y      = collections.deque([float("nan")] * HISTORY, maxlen=HISTORY)
+filtered_x = collections.deque([float("nan")] * HISTORY, maxlen=HISTORY)
+filtered_y = collections.deque([float("nan")] * HISTORY, maxlen=HISTORY)
 lock = threading.Lock()
 
-# ── Moving average ────────────────────────────────────────────────────────────
-
-def push_rssi(i, rssi):
-    """Push a new RSSI value for node i, update raw + MA buffers."""
-    buffers[i].append(rssi)
-
-    if rssi is not None:
-        ma_windows[i].append(rssi)
-        valid = [v for v in ma_windows[i] if v is not None]
-        ma_buffers[i].append(sum(valid) / len(valid) if valid else None)
-    else:
-        # Don't let a dead beacon corrupt the window — just gap the MA too
-        ma_buffers[i].append(None)
-
-# ── Serial reader thread ──────────────────────────────────────────────────────
+# ── Serial reader ─────────────────────────────────────────────────────────────
 
 def parse_line(line: str):
     try:
@@ -43,14 +23,17 @@ def parse_line(line: str):
         if not (line.startswith("{") and line.endswith("}")):
             return
         raw = json.loads(line)
-        data = raw.get("data_buffer", [])
-        if len(data) != N:
+        if "raw_pos_x" not in raw:
             return
+        rx = raw["raw_pos_x"]      / 100.0
+        ry = raw["raw_pos_y"]      / 100.0
+        fx = raw["filtered_pos_x"] / 100.0
+        fy = raw["filtered_pos_y"] / 100.0
         with lock:
-            for i, rssi in enumerate(data):
-                push_rssi(i, rssi if rssi != 0 else None)
+            raw_x.append(rx);      raw_y.append(ry)
+            filtered_x.append(fx); filtered_y.append(fy)
     except Exception as e:
-        print(f"Parse error: {e} | line: {line!r}")
+        print(f"Parse error: {e} | {line!r}")
 
 def serial_reader():
     while True:
@@ -70,45 +53,87 @@ threading.Thread(target=serial_reader, daemon=True).start()
 
 # ── Plot setup ────────────────────────────────────────────────────────────────
 
-fig, axes = plt.subplots(N, 1, figsize=(12, 26), sharex=True)
-fig.suptitle("Live RSSI — 13 iBeacon nodes", fontsize=13, fontweight="bold")
-fig.tight_layout(rect=[0, 0, 1, 0.97])
+fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+fig.suptitle("Live position — raw vs Kalman filtered", fontsize=13, fontweight="bold")
+fig.tight_layout(rect=[0, 0, 1, 0.95])
 
-raw_lines = []
-ma_lines  = []
+ax_x, ax_y, ax_xy_raw, ax_xy_filt = axes[0][0], axes[0][1], axes[1][0], axes[1][1]
 
-for i, ax in enumerate(axes):
-    (raw_line,) = ax.plot([], [], lw=0.8, alpha=0.35, color="steelblue", label="raw")
-    (ma_line,)  = ax.plot([], [], lw=1.6, color="steelblue", label=f"MA{MA_WINDOW}")
-    ax.set_xlim(0, HISTORY - 1)
-    ax.set_ylim(-100, -30)
-    ax.set_ylabel(NODE_NAMES[i], fontsize=8, rotation=0, labelpad=40, va="center")
-    ax.tick_params(axis="y", labelsize=7)
-    ax.tick_params(axis="x", labelsize=7)
-    ax.grid(True, alpha=0.3)
-    ax.axhline(-70, color="red", lw=0.5, linestyle="--", alpha=0.4)
-    raw_lines.append(raw_line)
-    ma_lines.append(ma_line)
+# Time-series X
+ax_x.set_title("X position over time")
+ax_x.set_ylabel("x (m)"); ax_x.set_xlabel("samples")
+ax_x.set_xlim(0, HISTORY - 1); ax_x.grid(True, alpha=0.3)
+line_raw_x,  = ax_x.plot([], [], lw=1.0, alpha=0.5, color="steelblue", label="raw")
+line_filt_x, = ax_x.plot([], [], lw=1.8, color="steelblue", label="kalman")
+ax_x.legend(fontsize=8)
 
-# Single legend on the first axis
-axes[0].legend(loc="upper right", fontsize=7, framealpha=0.6)
-axes[-1].set_xlabel("Samples")
+# Time-series Y
+ax_y.set_title("Y position over time")
+ax_y.set_ylabel("y (m)"); ax_y.set_xlabel("samples")
+ax_y.set_xlim(0, HISTORY - 1); ax_y.grid(True, alpha=0.3)
+line_raw_y,  = ax_y.plot([], [], lw=1.0, alpha=0.5, color="coral", label="raw")
+line_filt_y, = ax_y.plot([], [], lw=1.8, color="coral", label="kalman")
+ax_y.legend(fontsize=8)
 
-x_data = list(range(HISTORY))
+# XY trajectory — raw
+ax_xy_raw.set_title("XY trajectory — raw")
+ax_xy_raw.set_xlabel("x (m)"); ax_xy_raw.set_ylabel("y (m)")
+ax_xy_raw.grid(True, alpha=0.3)
+traj_raw,  = ax_xy_raw.plot([], [], lw=1.0, alpha=0.6, color="steelblue")
+dot_raw,   = ax_xy_raw.plot([], [], "o", ms=6, color="steelblue")
 
-def to_plot(buf):
-    return [v if v is not None else float("nan") for v in buf]
+# XY trajectory — filtered
+ax_xy_filt.set_title("XY trajectory — kalman")
+ax_xy_filt.set_xlabel("x (m)"); ax_xy_filt.set_ylabel("y (m)")
+ax_xy_filt.grid(True, alpha=0.3)
+traj_filt, = ax_xy_filt.plot([], [], lw=1.5, color="coral")
+dot_filt,  = ax_xy_filt.plot([], [], "o", ms=6, color="coral")
+
+x_idx = list(range(HISTORY))
 
 def update(_frame):
     with lock:
-        raw_snap = [list(b) for b in buffers]
-        ma_snap  = [list(b) for b in ma_buffers]
+        rx = list(raw_x);      ry = list(raw_y)
+        fx = list(filtered_x); fy = list(filtered_y)
 
-    for i in range(N):
-        raw_lines[i].set_data(x_data, to_plot(raw_snap[i]))
-        ma_lines[i].set_data(x_data,  to_plot(ma_snap[i]))
+    # time series
+    line_raw_x.set_data(x_idx, rx)
+    line_filt_x.set_data(x_idx, fx)
+    line_raw_y.set_data(x_idx, ry)
+    line_filt_y.set_data(x_idx, fy)
 
-    return raw_lines + ma_lines
+    # auto-scale time-series axes
+    for ax, vals in [(ax_x, rx + fx), (ax_y, ry + fy)]:
+        finite = [v for v in vals if v == v]  # filter nan
+        if finite:
+            pad = max((max(finite) - min(finite)) * 0.15, 0.5)
+            ax.set_ylim(min(finite) - pad, max(finite) + pad)
+
+    # XY trajectories
+    traj_raw.set_data(rx, ry)
+    traj_filt.set_data(fx, fy)
+
+    # current position dot (last non-nan)
+    def last_valid(xs, ys):
+        for x, y in zip(reversed(xs), reversed(ys)):
+            if x == x and y == y:
+                return [x], [y]
+        return [], []
+
+    dot_raw.set_data(*last_valid(rx, ry))
+    dot_filt.set_data(*last_valid(fx, fy))
+
+    # auto-scale XY axes (shared limits so they're comparable)
+    all_x = [v for v in rx + fx if v == v]
+    all_y = [v for v in ry + fy if v == v]
+    if all_x and all_y:
+        xpad = max((max(all_x) - min(all_x)) * 0.15, 0.5)
+        ypad = max((max(all_y) - min(all_y)) * 0.15, 0.5)
+        for ax in [ax_xy_raw, ax_xy_filt]:
+            ax.set_xlim(min(all_x) - xpad, max(all_x) + xpad)
+            ax.set_ylim(min(all_y) - ypad, max(all_y) + ypad)
+
+    return line_raw_x, line_filt_x, line_raw_y, line_filt_y, traj_raw, traj_filt, dot_raw, dot_filt
 
 ani = animation.FuncAnimation(fig, update, interval=200, blit=True, cache_frame_data=False)
 plt.show()
