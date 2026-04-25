@@ -9,22 +9,67 @@
 void build_Ab(float beacon_coords[][N_AXIS], float displacements[N_BEACONS], float A[][N_AXIS],
               float b[], int num_beacons)
 {
-    float xk = beacon_coords[num_beacons - 1][0];
-    float yk = beacon_coords[num_beacons - 1][1];
-    float rk = displacements[num_beacons - 1];
+    float coords_copy[N_BEACONS][N_AXIS];
+    float disp_copy[N_BEACONS];
+
+    for (int i = 0; i < num_beacons; i++) {
+        for (int j = 0; j < N_AXIS; j++) {
+            coords_copy[i][j] = beacon_coords[i][j];
+        }
+        disp_copy[i] = displacements[i];
+    }
+
+    int ref = 0;
+    float min_r = disp_copy[0];
+
+    for (int i = 1; i < num_beacons; i++) {
+        if (disp_copy[i] < min_r) {
+            min_r = disp_copy[i];
+            ref = i;
+        }
+    }
+    if (ref != num_beacons - 1) {
+        for (int j = 0; j < N_AXIS; j++) {
+            float tmp = coords_copy[ref][j];
+            coords_copy[ref][j] = coords_copy[num_beacons - 1][j];
+            coords_copy[num_beacons - 1][j] = tmp;
+        }
+
+        // swap distances
+        float tmp = disp_copy[ref];
+        disp_copy[ref] = disp_copy[num_beacons - 1];
+        disp_copy[num_beacons - 1] = tmp;
+    }
+
+    float xk = coords_copy[num_beacons - 1][0];
+    float yk = coords_copy[num_beacons - 1][1];
+    float rk = disp_copy[num_beacons - 1];
 
     for (int i = 0; i < num_beacons - 1; i++) {
-        float xi = beacon_coords[i][0];
-        float yi = beacon_coords[i][1];
-        float ri = displacements[i];
+        float xi = coords_copy[i][0];
+        float yi = coords_copy[i][1];
+        float ri = disp_copy[i];
 
-        // Apply weighted matrix
+        // solve:
+        //                           x = (A_T W A)^-1 A_T W b
+        //                 (A_T W A) x = A_T W b
+        //  (A_T sqrt[W])(sqrt[W] A) x = (A_T sqrt[W])(sqrt[W] b)
+        // (sqrt[W] A)_T (sqrt[W] A) x = (sqrt[W] A)_T (sqrt[W] b)
+        //
+        // let A' = sqrt[W]A, b' = sqrt[W]b
+        //
+        //.                  A'_T A' x = A'_T b'
+
+        // Apply square root of weighted matrix cells (sqrt[w_i]) to get A' and b'
         float w = 1.0f / fmaxf(ri * ri, 1e-4f);
+        float w_sqrt = sqrtf(w);
 
-        A[i][0] = w * 2.0f * (xk - xi);
-        A[i][1] = w * 2.0f * (yk - yi);
+        A[i][0] = w_sqrt * 2.0f * (xk - xi);
+        A[i][1] = w_sqrt * 2.0f * (yk - yi);
 
-        b[i] = w * (ri * ri - rk * rk - xi * xi + xk * xk - yi * yi + yk * yk);
+        b[i] = w_sqrt * (ri * ri - rk * rk - xi * xi + xk * xk - yi * yi + yk * yk);
+
+        // Above saves forming m matrix
     }
 }
 
@@ -70,7 +115,7 @@ int localise(float beacon_coords[N_BEACONS][N_AXIS], int8_t rssi[N_BEACONS], flo
     int valid_count = 0;
 
     for (int i = 0; i < N_BEACONS; i++) {
-        if (rssi[i] >= 0 || rssi[i] < -110) {
+        if (rssi[i] >= -30 || rssi[i] < -100) {
             continue;
         }
         valid_coords[valid_count][0] = beacon_coords[i][0];
