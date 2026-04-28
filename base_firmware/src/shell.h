@@ -17,13 +17,9 @@ struct ibeacon_node {
     char right_neighbour[32];
 };
 
-/* List access */
 extern sys_slist_t beacon_list;
-
-
 extern int sniffer;
 
-/* Functions */
 struct ibeacon_node *beacon_find(const char *name);
 int beacon_add(const char *name, const char *mac, uint16_t major, uint16_t minor, float x, float y,
                const char *left, const char *right);
