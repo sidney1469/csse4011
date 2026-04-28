@@ -7,7 +7,7 @@ const API    = 'http://localhost:8000'
 const GRID_W = 1200
 const GRID_H = 900
 const CELL   = 60
-const TABS   = ['nodes','position','sniffer','config','log']
+const TABS   = ['nodes','position','metrics','sniffer','config','log']
 const TRAJ_HISTORY = 300
 
 const PHY_STR = { 0:'None', 1:'LE 1M', 2:'LE 2M', 3:'LE Coded' }
@@ -26,6 +26,43 @@ function gridToMeters(gx, gy) {
   }
 }
 
+function SnifferModal({ node, onClose, rows }) {
+  if (!node) return null
+  return (
+    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.75)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:'#13161b',border:'1px solid #252b35',borderRadius:6,padding:20,width:440,maxHeight:'80vh',overflowY:'auto',boxShadow:'0 8px 40px rgba(0,0,0,0.6)'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14}}>
+          <div>
+            <div style={{fontFamily:'monospace',fontSize:12,fontWeight:600,color:'#c8d4e0'}}>{node.has_name && node.name ? node.name : 'Unknown Device'}</div>
+            <div style={{fontFamily:'monospace',fontSize:9,color:'#4a5568',marginTop:3}}>{node.addr}</div>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
+            <span style={{fontFamily:'monospace',fontSize:13,color:'#3b8aff',fontWeight:600}}>{node.rssi} dBm</span>
+            <button onClick={onClose} style={{background:'transparent',border:'1px solid #252b35',borderRadius:3,color:'#4a5568',fontFamily:'monospace',fontSize:12,padding:'2px 9px',cursor:'pointer'}}>✕</button>
+          </div>
+        </div>
+        <div style={{borderTop:'1px solid #252b35',marginBottom:12}}/>
+        {rows.map(([label,value])=>(
+          <div key={label} style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',padding:'4px 0',borderBottom:'1px solid #1a1e24',gap:12}}>
+            <span style={{fontFamily:'monospace',fontSize:9,color:'#4a5568',flexShrink:0,minWidth:130}}>{label}</span>
+            <span style={{fontFamily:'monospace',fontSize:9,color:'#c8d4e0',textAlign:'right',wordBreak:'break-all'}}>{value}</span>
+          </div>
+        ))}
+        {node.raw && (Array.isArray(node.raw) ? node.raw.length > 0 : String(node.raw).length > 0) && (
+          <div style={{marginTop:12}}>
+            <div style={{fontFamily:'monospace',fontSize:9,color:'#4a5568',marginBottom:6}}>Raw payload {Array.isArray(node.raw)?`(${node.raw.length} B)`:''}</div>
+            <div style={{background:'#0c0e11',border:'1px solid #252b35',borderRadius:3,padding:'8px',fontFamily:'monospace',fontSize:8,color:'#4a5568',lineHeight:1.8,wordBreak:'break-all'}}>
+              {Array.isArray(node.raw)
+                ? node.raw.map((b,i)=><span key={i} style={{marginRight:4}}>{b.toString(16).padStart(2,'0')}</span>)
+                : String(node.raw)}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const EMPTY_FORM = { name:'', mac:'', major:0, minor:0, x:0, y:0, z:0, left:'', right:'' }
 
 export default function App() {
@@ -33,6 +70,8 @@ export default function App() {
   const [liveData,        setLiveData]        = useState({})
   const [liveRawPos,      setLiveRawPos]      = useState(null)
   const [liveFiltPos,     setLiveFiltPos]     = useState(null)
+  const [liveVelocity,    setLiveVelocity]    = useState(null)
+  const [liveTimestamp,   setLiveTimestamp]   = useState(null)
   const [selectedId,      setSelectedId]      = useState(null)
   const [addMode,         setAddMode]         = useState(false)
   const [showRings,       setShowRings]       = useState(true)
@@ -51,6 +90,12 @@ export default function App() {
   const [snifferMode,     setSnifferMode]     = useState(false)
   const [snifferNodes,    setSnifferNodes]    = useState({})
   const [selectedSniffer, setSelectedSniffer] = useState(null)
+
+  // Metrics state
+  const [totalDistance,   setTotalDistance]   = useState(0)
+  const [avgVelocity,     setAvgVelocity]     = useState(0)
+  const [velSamples,      setVelSamples]      = useState([])
+  const lastFiltPosRef = useRef(null)
 
   const rawHistRef  = useRef([])
   const filtHistRef = useRef([])
@@ -81,8 +126,18 @@ export default function App() {
     for (let x = 0; x <= GRID_W; x += CELL) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,GRID_H); ctx.stroke() }
     for (let y = 0; y <= GRID_H; y += CELL) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(GRID_W,y); ctx.stroke() }
     ctx.strokeStyle = 'rgba(55,65,80,1)'; ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(GRID_W/2,0);  ctx.lineTo(GRID_W/2,GRID_H); ctx.stroke()
-    ctx.beginPath(); ctx.moveTo(0,GRID_H/2);  ctx.lineTo(GRID_W,GRID_H/2); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(GRID_W/2,0); ctx.lineTo(GRID_W/2,GRID_H); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(0,GRID_H/2); ctx.lineTo(GRID_W,GRID_H/2); ctx.stroke()
+    // Grid labels (metres)
+    ctx.fillStyle = 'rgba(74,85,104,0.6)'; ctx.font = '10px monospace'
+    for (let x = 0; x <= GRID_W; x += CELL) {
+      const m = ((x - GRID_W/2) / CELL).toFixed(0)
+      ctx.fillText(m+'m', x+2, GRID_H/2-4)
+    }
+    for (let y = 0; y <= GRID_H; y += CELL) {
+      const m = ((GRID_H/2 - y) / CELL).toFixed(0)
+      ctx.fillText(m+'m', GRID_W/2+4, y+10)
+    }
   }, [])
 
   // ── Trajectory RAF loop ───────────────────────────────────────────────────
@@ -120,7 +175,7 @@ export default function App() {
         ctx.restore()
       }
       if(showRawRef.current)  drawPath(rh,'#3b8aff',0.45,1.2)
-      if(showFiltRef.current) drawPath(fh,'#00e5a0',0.9, 2.0)
+      if(showFiltRef.current) drawPath(fh,'#00e5a0',0.9,2.0)
       raf = requestAnimationFrame(draw)
     }
     raf = requestAnimationFrame(draw)
@@ -152,7 +207,6 @@ export default function App() {
       ws.onmessage = (e) => {
         let pkt; try { pkt = JSON.parse(e.data) } catch { return }
 
-        // ── beacon_list ────────────────────────────────────────────────
         if (pkt.type === 'beacon_list') {
           addLog(`Received ${pkt.beacons?.length ?? 0} beacons`, 'ok')
           setNodes(prev => {
@@ -166,16 +220,11 @@ export default function App() {
           return
         }
 
-        // ── sniffer_node ───────────────────────────────────────────────
         if (pkt.type === 'sniffer_node') {
-          setSnifferNodes(prev => ({
-            ...prev,
-            [pkt.addr]: { ...pkt, last_seen: Date.now() }
-          }))
+          setSnifferNodes(prev => ({ ...prev, [pkt.addr]: { ...pkt, last_seen: Date.now() } }))
           return
         }
 
-        // ── rssi packet ────────────────────────────────────────────────
         if (pkt.type === 'rssi') {
           setPktCount(c => c + 1)
           setLiveData(prev => {
@@ -186,15 +235,40 @@ export default function App() {
             })
             return next
           })
+
+          if (pkt.velocity) {
+            const v = pkt.velocity
+            setLiveVelocity(v)
+            const speed = Math.sqrt(v.x * v.x + v.y * v.y)
+            setVelSamples(prev => {
+              const next = [...prev.slice(-299), speed]
+              setAvgVelocity(next.reduce((a,b)=>a+b,0) / next.length)
+              return next
+            })
+          }
+
+          if (pkt.timestamp != null) {
+            setLiveTimestamp(pkt.timestamp)
+          }
+
           if (pkt.raw_position) {
             const rp = pkt.raw_position
             setLiveRawPos(rp)
             rawHistRef.current = [...rawHistRef.current.slice(-(TRAJ_HISTORY-1)), { x:rp.x, y:rp.y }]
           }
+
           if (pkt.position) {
             const fp = pkt.position
             setLiveFiltPos(fp)
             filtHistRef.current = [...filtHistRef.current.slice(-(TRAJ_HISTORY-1)), { x:fp.x, y:fp.y }]
+            // accumulate distance
+            if (lastFiltPosRef.current) {
+              const dx = fp.x - lastFiltPosRef.current.x
+              const dy = fp.y - lastFiltPosRef.current.y
+              const d  = Math.sqrt(dx*dx + dy*dy)
+              if (d < 5) setTotalDistance(prev => prev + d) // ignore jumps >5m
+            }
+            lastFiltPosRef.current = fp
           }
         }
       }
@@ -253,9 +327,7 @@ export default function App() {
       setSnifferMode(next)
       if (!next) { setSnifferNodes({}); setSelectedSniffer(null) }
       addLog(`Sniffer mode ${next ? 'ON' : 'OFF'}`, 'ok')
-    } catch(err) {
-      addLog(`Sniffer toggle failed: ${err.message}`, 'err')
-    }
+    } catch(err) { addLog(`Sniffer toggle failed: ${err.message}`, 'err') }
   }
 
   const viewNode     = async (name) => { try{await axios.get(`${API}/view_node/${name}`);addLog(`Queried ${name}`)}catch(err){addLog(err.message,'err')} }
@@ -265,32 +337,33 @@ export default function App() {
     try{await axios.post(`${API}/config`,config);addLog('Config saved','ok')}catch(err){addLog(`Config save failed: ${err.message}`,'err')}
     finally{setConfigSaving(false)}
   }
-  const fitView = () => { const w=gridWrapRef.current;if(!w)return;w.scrollLeft=(GRID_W-w.clientWidth)/2;w.scrollTop=(GRID_H-w.clientHeight)/2 }
-  const clearTrajectory = () => { rawHistRef.current=[]; filtHistRef.current=[] }
+  const fitView         = () => { const w=gridWrapRef.current;if(!w)return;w.scrollLeft=(GRID_W-w.clientWidth)/2;w.scrollTop=(GRID_H-w.clientHeight)/2 }
+  const clearTrajectory = () => { rawHistRef.current=[]; filtHistRef.current=[]; lastFiltPosRef.current=null; setTotalDistance(0); setAvgVelocity(0); setVelSamples([]) }
 
   const live        = selectedId ? (liveData[selectedId]||{}) : {}
   const activeCount = Object.values(liveData).filter(n=>n.rssi&&n.rssi!==0).length
-  const gridPos     = liveFiltPos || liveRawPos
+  const liveSpeed   = liveVelocity ? Math.sqrt(liveVelocity.x**2 + liveVelocity.y**2) : null
+  const uptimeSec   = liveTimestamp ? (liveTimestamp / 1000).toFixed(1) : null
 
-  // ── Sniffer inspector rows ────────────────────────────────────────────────
-  const snifferInspectorRows = (n) => [
-    ['Address',    n.addr],
-    ['RSSI',       `${n.rssi} dBm`],
-    ['TX Power',   n.tx_power != null ? `${n.tx_power} dBm` : '—'],
-    ['Adv Type',   `0x${(n.adv_type||0).toString(16).padStart(2,'0')} (${ADV_TYPE_STR[n.adv_type] || '?'})`],
-    ['Adv Props',  `0x${(n.adv_props||0).toString(16).padStart(4,'0')}`],
-    ['Primary PHY',   PHY_STR[n.primary_phy]   || n.primary_phy],
-    ['Secondary PHY', PHY_STR[n.secondary_phy] || n.secondary_phy],
-    ['Interval',   n.interval ? `${(n.interval * 1.25).toFixed(2)} ms` : 'none'],
-    n.has_name && n.name && ['Name', n.name],
-    n.has_flags  && ['Flags', `0x${(n.flags||0).toString(16).padStart(2,'0')}`],
-    n.has_manufacturer_data && ['Company ID', `0x${(n.manufacturer_company_id||0).toString(16).padStart(4,'0')}`],
-    n.has_manufacturer_data && n.manufacturer_data?.length > 0 &&
-      ['Mfr Data', n.manufacturer_data.map(b=>b.toString(16).padStart(2,'0')).join(' ')],
-    n.has_service_data && ['Svc Data Type', `0x${(n.service_data_type||0).toString(16).padStart(2,'0')}`],
-    n.has_service_data && n.service_data?.length > 0 &&
-      ['Svc Data', n.service_data.map(b=>b.toString(16).padStart(2,'0')).join(' ')],
-  ].filter(Boolean)
+  const snifferInspectorRows = (n) => {
+    const hexStr = (val) => Array.isArray(val) ? val.map(b=>b.toString(16).padStart(2,'0')).join(' ') : (val||'—')
+    return [
+      ['Address',       n.addr],
+      ['RSSI',          `${n.rssi} dBm`],
+      ['TX Power',      n.tx_power != null ? `${n.tx_power} dBm` : '—'],
+      ['Adv Type',      `0x${(n.adv_type||0).toString(16).padStart(2,'0')} (${ADV_TYPE_STR[n.adv_type]||'?'})`],
+      ['Adv Props',     `0x${(n.adv_props||0).toString(16).padStart(4,'0')}`],
+      ['Primary PHY',   PHY_STR[n.primary_phy]   || String(n.primary_phy  ??'—')],
+      ['Secondary PHY', PHY_STR[n.secondary_phy] || String(n.secondary_phy??'—')],
+      ['Interval',      n.interval ? `${(Number(n.interval)*1.25).toFixed(2)} ms` : 'none'],
+      n.has_name && n.name && ['Name', n.name],
+      n.has_flags && ['Flags', `0x${(n.flags||0).toString(16).padStart(2,'0')}`],
+      n.has_manufacturer_data && ['Company ID', `0x${(n.manufacturer_company_id||0).toString(16).padStart(4,'0')}`],
+      n.has_manufacturer_data && n.manufacturer_data && ['Mfr Data', hexStr(n.manufacturer_data)],
+      n.has_service_data && ['Svc Data Type', `0x${(n.service_data_type||0).toString(16).padStart(2,'0')}`],
+      n.has_service_data && n.service_data && ['Svc Data', hexStr(n.service_data)],
+    ].filter(Boolean)
+  }
 
   return (
     <div style={s.root}>
@@ -301,13 +374,11 @@ export default function App() {
         <Pill>PKT <b style={s.val}>{pktCount}</b></Pill>
         <Pill>NODES <b style={s.val}>{Object.keys(nodes).length}</b></Pill>
         <Pill>ACTIVE <b style={{...s.val,color:activeCount>0?'#00e5a0':'#4a5568'}}>{activeCount}</b></Pill>
+        {liveSpeed != null && <Pill>SPD <b style={{...s.val,color:'#f6c343'}}>{liveSpeed.toFixed(2)} m/s</b></Pill>}
         {snifferMode && <Pill>SNIFF <b style={{...s.val,color:'#f6c343'}}>{Object.keys(snifferNodes).length}</b></Pill>}
         <div style={{flex:1}}/>
-        <button
-          style={{...s.btnSm,...(snifferMode?{background:'#f6c343',color:'#000',borderColor:'#f6c343'}:{})}}
-          onClick={()=>{ toggleSniffer(); setActiveTab('sniffer') }}
-        >
-          {snifferMode ? '◉ Sniffer ON' : '◎ Sniffer'}
+        <button style={{...s.btnSm,...(snifferMode?{background:'#f6c343',color:'#000',borderColor:'#f6c343'}:{})}} onClick={()=>{toggleSniffer();setActiveTab('sniffer')}}>
+          {snifferMode?'◉ Sniffer ON':'◎ Sniffer'}
         </button>
         <button style={{...s.btnSm,...(addMode?s.btnSmActive:{})}} onClick={()=>setAddMode(v=>!v)}>{addMode?'✕ Cancel':'+ Place'}</button>
         <button style={s.btnSm} onClick={fitView}>Fit</button>
@@ -352,6 +423,26 @@ export default function App() {
               )
             })()}
 
+            {/* Velocity arrow */}
+            {showPos && liveFiltPos && liveVelocity && (()=>{
+              const{gx,gy}=metersToGrid(liveFiltPos.x,liveFiltPos.y)
+              const scale = 30
+              const vx = liveVelocity.x * scale
+              const vy = -liveVelocity.y * scale
+              const len = Math.sqrt(vx*vx+vy*vy)
+              if (len < 2) return null
+              return (
+                <svg style={{position:'absolute',left:gx,top:gy,overflow:'visible',pointerEvents:'none',zIndex:19}} width={0} height={0}>
+                  <defs>
+                    <marker id="arrowhead" markerWidth="6" markerHeight="4" refX="3" refY="2" orient="auto">
+                      <polygon points="0 0, 6 2, 0 4" fill="#f6c343"/>
+                    </marker>
+                  </defs>
+                  <line x1={0} y1={0} x2={vx} y2={vy} stroke="#f6c343" strokeWidth={2} markerEnd="url(#arrowhead)" opacity={0.8}/>
+                </svg>
+              )
+            })()}
+
             {Object.values(nodes).map(node=>{
               const ld=liveData[node.name]||{}
               const active=ld.rssi&&ld.rssi!==0
@@ -376,7 +467,7 @@ export default function App() {
           <div style={s.tabs}>
             {TABS.map(tab=>(
               <button key={tab} onClick={()=>setActiveTab(tab)} style={{...s.tab,...(activeTab===tab?s.tabActive:{})}}>
-                {tab==='nodes'?'◈ Nodes':tab==='position'?'⊕ Pos':tab==='sniffer'?'⊙ Sniff':tab==='config'?'⚙ Cfg':'▤ Log'}
+                {tab==='nodes'?'◈':tab==='position'?'⊕':tab==='metrics'?'◎':tab==='sniffer'?'⊙':tab==='config'?'⚙':'▤'}
               </button>
             ))}
           </div>
@@ -446,28 +537,24 @@ export default function App() {
                 </div>
                 <div style={{display:'flex',gap:6,marginBottom:10}}>
                   <button onClick={()=>setShowRaw(v=>!v)} style={{...s.toggleBtn,borderColor:showRaw?'#3b8aff':'#252b35',color:showRaw?'#3b8aff':'#4a5568',background:showRaw?'rgba(59,138,255,0.08)':'transparent'}}>
-                    <span style={{width:8,height:8,borderRadius:'50%',background:showRaw?'#3b8aff':'#4a5568',display:'inline-block',marginRight:5}}/>Raw (LS)
+                    <span style={{width:8,height:8,borderRadius:'50%',background:showRaw?'#3b8aff':'#4a5568',display:'inline-block',marginRight:5}}/>Raw
                   </button>
                   <button onClick={()=>setShowFilt(v=>!v)} style={{...s.toggleBtn,borderColor:showFilt?'#00e5a0':'#252b35',color:showFilt?'#00e5a0':'#4a5568',background:showFilt?'rgba(0,229,160,0.08)':'transparent'}}>
                     <span style={{width:8,height:8,borderRadius:'50%',background:showFilt?'#00e5a0':'#4a5568',display:'inline-block',marginRight:5}}/>Kalman
                   </button>
                 </div>
                 <div style={{background:'#0c0e11',border:'1px solid #252b35',borderRadius:4,overflow:'hidden',marginBottom:12}}>
-                  <canvas ref={trajCanvasRef} width={262} height={220} style={{display:'block',width:'100%'}}/>
+                  <canvas ref={trajCanvasRef} width={262} height={200} style={{display:'block',width:'100%'}}/>
                 </div>
                 <div style={s.sectionLabel}>Current position</div>
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
-                  <div style={{background:'#0c0e11',border:'1px solid rgba(59,138,255,0.3)',borderRadius:4,padding:'8px',textAlign:'center'}}>
+                  <div style={s.posBox}>
                     <div style={{fontFamily:'monospace',fontSize:8,color:'#3b8aff',marginBottom:4}}>RAW (LS)</div>
-                    <div style={{fontFamily:'monospace',fontSize:12,color:'#c8d4e0'}}>
-                      {liveRawPos ? `${liveRawPos.x.toFixed(2)}, ${liveRawPos.y.toFixed(2)}` : '—'}
-                    </div>
+                    <div style={{fontFamily:'monospace',fontSize:11,color:'#c8d4e0'}}>{liveRawPos?`${liveRawPos.x.toFixed(2)}, ${liveRawPos.y.toFixed(2)}`:'—'}</div>
                   </div>
-                  <div style={{background:'#0c0e11',border:'1px solid rgba(0,229,160,0.3)',borderRadius:4,padding:'8px',textAlign:'center'}}>
+                  <div style={{...s.posBox,borderColor:'rgba(0,229,160,0.3)'}}>
                     <div style={{fontFamily:'monospace',fontSize:8,color:'#00e5a0',marginBottom:4}}>KALMAN</div>
-                    <div style={{fontFamily:'monospace',fontSize:12,color:'#c8d4e0'}}>
-                      {liveFiltPos ? `${liveFiltPos.x.toFixed(2)}, ${liveFiltPos.y.toFixed(2)}` : '—'}
-                    </div>
+                    <div style={{fontFamily:'monospace',fontSize:11,color:'#c8d4e0'}}>{liveFiltPos?`${liveFiltPos.x.toFixed(2)}, ${liveFiltPos.y.toFixed(2)}`:'—'}</div>
                   </div>
                 </div>
                 <hr style={s.divider}/>
@@ -488,104 +575,98 @@ export default function App() {
               </>
             )}
 
-            {/* ── SNIFFER ── */}
-            {activeTab==='sniffer' && (
+            {/* ── METRICS ── */}
+            {activeTab==='metrics' && (
               <>
-                {/* Header row */}
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-                  <div style={s.sectionLabel}>
-                    Sniffer&nbsp;
-                    <span style={{color: snifferMode ? '#f6c343' : '#4a5568'}}>
-                      {snifferMode ? '● ON' : '○ OFF'}
-                    </span>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+                  <div style={s.sectionLabel}>Live metrics</div>
+                  <button onClick={clearTrajectory} style={{...s.btnSm,fontSize:9}}>Reset</button>
+                </div>
+
+                {/* Big metric cards */}
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
+                  <MetricCard label="Speed" value={liveSpeed!=null?`${liveSpeed.toFixed(3)} m/s`:'—'} color="#f6c343"/>
+                  <MetricCard label="Avg Speed" value={avgVelocity?`${avgVelocity.toFixed(3)} m/s`:'—'} color="#f6c343"/>
+                  <MetricCard label="Distance" value={`${totalDistance.toFixed(2)} m`} color="#00e5a0"/>
+                  <MetricCard label="Packets" value={pktCount} color="#3b8aff"/>
+                </div>
+
+                <hr style={s.divider}/>
+                <div style={s.sectionLabel}>Velocity vector</div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
+                  <div style={s.posBox}>
+                    <div style={{fontFamily:'monospace',fontSize:8,color:'#f6c343',marginBottom:4}}>Vx</div>
+                    <div style={{fontFamily:'monospace',fontSize:12,color:'#c8d4e0'}}>{liveVelocity?`${liveVelocity.x.toFixed(3)} m/s`:'—'}</div>
                   </div>
-                  <div style={{display:'flex',gap:6}}>
-                    <button
-                      onClick={toggleSniffer}
-                      style={{...s.btnSm,fontSize:9,...(snifferMode?{background:'#f6c343',color:'#000',borderColor:'#f6c343'}:{})}}
-                    >
-                      {snifferMode ? 'Turn OFF' : 'Turn ON'}
-                    </button>
-                    <button onClick={()=>{setSnifferNodes({});setSelectedSniffer(null)}} style={{...s.btnSm,fontSize:9}}>Clear</button>
+                  <div style={{...s.posBox,borderColor:'rgba(246,195,67,0.3)'}}>
+                    <div style={{fontFamily:'monospace',fontSize:8,color:'#f6c343',marginBottom:4}}>Vy</div>
+                    <div style={{fontFamily:'monospace',fontSize:12,color:'#c8d4e0'}}>{liveVelocity?`${liveVelocity.y.toFixed(3)} m/s`:'—'}</div>
                   </div>
                 </div>
 
-                {/* Node list */}
-                <div style={{display:'flex',flexDirection:'column',gap:3,marginBottom:12}}>
-                  {Object.values(snifferNodes)
-                    .sort((a,b) => b.rssi - a.rssi)
-                    .map(node => {
-                      const label = node.has_name && node.name ? node.name : node.addr
-                      const isSelected = selectedSniffer === node.addr
-                      const age = Date.now() - (node.last_seen || 0)
-                      const fresh = age < 3000
-                      return (
-                        <div
-                          key={node.addr}
-                          onClick={() => setSelectedSniffer(isSelected ? null : node.addr)}
-                          style={{
-                            background: isSelected ? 'rgba(59,138,255,.1)' : '#0c0e11',
-                            border: `1px solid ${isSelected ? '#3b8aff' : fresh ? 'rgba(246,195,67,0.3)' : '#252b35'}`,
-                            borderRadius: 3, padding:'6px 8px', cursor:'pointer',
-                            transition:'border-color .3s',
-                          }}
-                        >
-                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                            <span style={{fontFamily:'monospace',fontSize:10,color: fresh ? '#c8d4e0' : '#4a5568',maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                              {label}
-                            </span>
-                            <div style={{display:'flex',gap:8,alignItems:'center',flexShrink:0}}>
-                              <RssiBar rssi={node.rssi}/>
-                              <span style={{fontFamily:'monospace',fontSize:9,color:'#3b8aff'}}>{node.rssi}</span>
-                            </div>
-                          </div>
-                          {node.has_name && node.name && (
-                            <div style={{fontFamily:'monospace',fontSize:8,color:'#4a5568',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                              {node.addr}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })
-                  }
-                  {Object.keys(snifferNodes).length === 0 && (
-                    <div style={{...s.emptyState, height:80}}>
-                      {snifferMode ? 'Scanning for nodes…' : 'Enable sniffer mode to scan'}
+                <hr style={s.divider}/>
+                <div style={s.sectionLabel}>Timestamp</div>
+                <div style={{background:'#0c0e11',border:'1px solid #252b35',borderRadius:4,padding:'10px 12px',marginBottom:12}}>
+                  <div style={{fontFamily:'monospace',fontSize:9,color:'#4a5568',marginBottom:4}}>Firmware uptime (ms)</div>
+                  <div style={{fontFamily:'monospace',fontSize:14,color:'#c8d4e0',letterSpacing:'.05em'}}>
+                    {liveTimestamp != null ? liveTimestamp.toLocaleString() : '—'}
+                  </div>
+                  {uptimeSec && (
+                    <div style={{fontFamily:'monospace',fontSize:9,color:'#4a5568',marginTop:4}}>
+                      = {uptimeSec} s uptime
                     </div>
                   )}
                 </div>
 
-                {/* Inspector */}
-                {selectedSniffer && snifferNodes[selectedSniffer] && (() => {
-                  const n = snifferNodes[selectedSniffer]
-                  const rows = snifferInspectorRows(n)
-                  return (
-                    <div style={{background:'#0c0e11',border:'1px solid #252b35',borderRadius:4,padding:10}}>
-                      <div style={{...s.sectionLabel,marginBottom:8}}>Inspector</div>
-                      {rows.map(([label, value]) => (
-                        <div key={label} style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',
-                          padding:'3px 0',borderBottom:'1px solid #1a1e24',gap:8}}>
-                          <span style={{fontFamily:'monospace',fontSize:9,color:'#4a5568',flexShrink:0}}>{label}</span>
-                          <span style={{fontFamily:'monospace',fontSize:9,color:'#c8d4e0',
-                            textAlign:'right',wordBreak:'break-all'}}>{value}</span>
-                        </div>
-                      ))}
-                      {n.raw?.length > 0 && (
-                        <div style={{marginTop:8}}>
-                          <div style={{fontFamily:'monospace',fontSize:9,color:'#4a5568',marginBottom:4}}>
-                            Raw payload ({n.raw.length} B)
+                <hr style={s.divider}/>
+                <div style={s.sectionLabel}>Position summary</div>
+                <StatRow label="Raw X"      value={liveRawPos  ? `${liveRawPos.x.toFixed(3)} m`  : '—'} color="#3b8aff"/>
+                <StatRow label="Raw Y"      value={liveRawPos  ? `${liveRawPos.y.toFixed(3)} m`  : '—'} color="#3b8aff"/>
+                <StatRow label="Kalman X"   value={liveFiltPos ? `${liveFiltPos.x.toFixed(3)} m` : '—'} color="#00e5a0"/>
+                <StatRow label="Kalman Y"   value={liveFiltPos ? `${liveFiltPos.y.toFixed(3)} m` : '—'} color="#00e5a0"/>
+                <StatRow label="Active nodes" value={activeCount} color={activeCount>0?'#00e5a0':'#4a5568'}/>
+              </>
+            )}
+
+            {/* ── SNIFFER ── */}
+            {activeTab==='sniffer' && (
+              <>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+                  <div style={s.sectionLabel}>
+                    Sniffer&nbsp;
+                    <span style={{color:snifferMode?'#f6c343':'#4a5568'}}>{snifferMode?'● ON':'○ OFF'}</span>
+                  </div>
+                  <div style={{display:'flex',gap:6}}>
+                    <button onClick={toggleSniffer} style={{...s.btnSm,fontSize:9,...(snifferMode?{background:'#f6c343',color:'#000',borderColor:'#f6c343'}:{})}}>
+                      {snifferMode?'Turn OFF':'Turn ON'}
+                    </button>
+                    <button onClick={()=>{setSnifferNodes({});setSelectedSniffer(null)}} style={{...s.btnSm,fontSize:9}}>Clear</button>
+                  </div>
+                </div>
+                <div style={{display:'flex',flexDirection:'column',gap:3}}>
+                  {Object.values(snifferNodes).sort((a,b)=>b.rssi-a.rssi).map(node=>{
+                    const label=node.has_name&&node.name?node.name:node.addr
+                    const fresh=Date.now()-(node.last_seen||0)<3000
+                    return (
+                      <div key={node.addr} onClick={()=>setSelectedSniffer(node.addr)}
+                        style={{background:'#0c0e11',border:`1px solid ${fresh?'rgba(246,195,67,0.3)':'#252b35'}`,borderRadius:3,padding:'6px 8px',cursor:'pointer',transition:'border-color .3s'}}>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                          <span style={{fontFamily:'monospace',fontSize:10,color:fresh?'#c8d4e0':'#4a5568',maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{label}</span>
+                          <div style={{display:'flex',gap:8,alignItems:'center',flexShrink:0}}>
+                            <RssiBar rssi={node.rssi}/>
+                            <span style={{fontFamily:'monospace',fontSize:9,color:'#3b8aff'}}>{node.rssi}</span>
                           </div>
-                          <div style={{fontFamily:'monospace',fontSize:8,color:'#4a5568',
-                            lineHeight:1.8,wordBreak:'break-all'}}>
-                            {n.raw.map((b,i)=>(
-                              <span key={i} style={{marginRight:4}}>{b.toString(16).padStart(2,'0')}</span>
-                            ))}
-                          </div>
                         </div>
-                      )}
-                    </div>
-                  )
-                })()}
+                        {node.has_name&&node.name&&(
+                          <div style={{fontFamily:'monospace',fontSize:8,color:'#4a5568',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{node.addr}</div>
+                        )}
+                      </div>
+                    )
+                  })}
+                  {Object.keys(snifferNodes).length===0&&(
+                    <div style={{...s.emptyState,height:80}}>{snifferMode?'Scanning for nodes…':'Enable sniffer mode to scan'}</div>
+                  )}
+                </div>
               </>
             )}
 
@@ -599,11 +680,11 @@ export default function App() {
                 <button onClick={saveConfig} disabled={configSaving} style={s.btnPrimary}>{configSaving?'Saving…':'Save config'}</button>
                 <hr style={s.divider}/>
                 <div style={s.sectionLabel}>Connection</div>
-                <StatRow label="WS status"   value={wsStatus}                  color={wsStatus==='Connected'?'#00e5a0':'#ff6b35'}/>
-                <StatRow label="Packets rx"  value={pktCount}                  color="#c8d4e0"/>
+                <StatRow label="WS status"   value={wsStatus}  color={wsStatus==='Connected'?'#00e5a0':'#ff6b35'}/>
+                <StatRow label="Packets rx"  value={pktCount}  color="#c8d4e0"/>
                 <StatRow label="Nodes known" value={Object.keys(nodes).length} color="#c8d4e0"/>
-                <StatRow label="Active"      value={activeCount}               color={activeCount>0?'#00e5a0':'#4a5568'}/>
-                <StatRow label="Sniffer"     value={snifferMode?'ON':'OFF'}    color={snifferMode?'#f6c343':'#4a5568'}/>
+                <StatRow label="Active"      value={activeCount} color={activeCount>0?'#00e5a0':'#4a5568'}/>
+                <StatRow label="Sniffer"     value={snifferMode?'ON':'OFF'} color={snifferMode?'#f6c343':'#4a5568'}/>
                 <StatRow label="Sniff nodes" value={Object.keys(snifferNodes).length} color="#c8d4e0"/>
               </>
             )}
@@ -629,7 +710,14 @@ export default function App() {
           </div>
 
           <div style={s.legend}>
-            {[{bg:'rgba(0,229,160,.08)',border:'#00e5a0',label:'Active'},{bg:'rgba(59,138,255,.1)',border:'#3b8aff',label:'Selected'},{bg:'rgba(255,107,53,.15)',border:'#ff6b35',label:'Kalman pos'},{bg:'rgba(59,138,255,.15)',border:'#3b8aff',label:'Raw pos'},{bg:'#1a1e24',border:'#252b35',label:'Inactive',dim:true}].map(({bg,border,label,dim})=>(
+            {[
+              {bg:'rgba(0,229,160,.08)',  border:'#00e5a0', label:'Active'},
+              {bg:'rgba(59,138,255,.1)',  border:'#3b8aff', label:'Selected'},
+              {bg:'rgba(255,107,53,.15)', border:'#ff6b35', label:'Kalman'},
+              {bg:'rgba(59,138,255,.15)', border:'#3b8aff', label:'Raw'},
+              {bg:'rgba(246,195,67,.15)', border:'#f6c343', label:'Velocity'},
+              {bg:'#1a1e24',             border:'#252b35', label:'Inactive', dim:true},
+            ].map(({bg,border,label,dim})=>(
               <div key={label} style={{display:'flex',alignItems:'center',gap:5,opacity:dim?0.4:1}}>
                 <div style={{width:8,height:8,borderRadius:'50%',background:bg,border:`2px solid ${border}`,flexShrink:0}}/>
                 <span style={{fontFamily:'monospace',fontSize:9,color:'#4a5568'}}>{label}</span>
@@ -638,11 +726,26 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      <SnifferModal
+        node={selectedSniffer?snifferNodes[selectedSniffer]:null}
+        onClose={()=>setSelectedSniffer(null)}
+        rows={selectedSniffer&&snifferNodes[selectedSniffer]?snifferInspectorRows(snifferNodes[selectedSniffer]):[]}
+      />
+
       <style>{`@keyframes pulse{0%,100%{box-shadow:0 0 0 4px rgba(255,107,53,0.15);}50%{box-shadow:0 0 0 8px rgba(255,107,53,0.05);}}`}</style>
     </div>
   )
 }
 
+function MetricCard({label,value,color}){
+  return(
+    <div style={{background:'#0c0e11',border:`1px solid ${color}22`,borderRadius:4,padding:'10px 12px'}}>
+      <div style={{fontFamily:'monospace',fontSize:8,color:'#4a5568',marginBottom:6,letterSpacing:'.1em',textTransform:'uppercase'}}>{label}</div>
+      <div style={{fontFamily:'monospace',fontSize:13,color,fontWeight:600}}>{value}</div>
+    </div>
+  )
+}
 function Pill({children}){return<div style={{display:'inline-flex',alignItems:'center',gap:5,background:'#1a1e24',border:'1px solid #252b35',borderRadius:3,padding:'2px 8px',fontFamily:'monospace',fontSize:10,color:'#4a5568'}}>{children}</div>}
 function Dot({status}){const color=status==='Connected'?'#00e5a0':status==='Error'?'#ff6b35':'#4a5568';return<div style={{width:6,height:6,borderRadius:'50%',background:color,flexShrink:0}}/>}
 function Field({label,children}){return<div style={{display:'flex',flexDirection:'column',gap:3,marginBottom:9}}><span style={{fontFamily:'monospace',fontSize:9,letterSpacing:'.1em',textTransform:'uppercase',color:'#4a5568'}}>{label}</span>{children}</div>}
@@ -661,7 +764,7 @@ const s={
   gridWrap:{flex:1,overflow:'auto',position:'relative'},
   panel:{width:290,flexShrink:0,background:'#13161b',borderLeft:'1px solid #252b35',display:'flex',flexDirection:'column',overflow:'hidden'},
   tabs:{display:'flex',borderBottom:'1px solid #252b35',flexShrink:0},
-  tab:{flex:1,background:'transparent',border:'none',borderBottom:'2px solid transparent',color:'#4a5568',fontFamily:'monospace',fontSize:9,padding:'8px 2px',cursor:'pointer',letterSpacing:'.03em'},
+  tab:{flex:1,background:'transparent',border:'none',borderBottomWidth:'2px',borderBottomStyle:'solid',borderBottomColor:'transparent',color:'#4a5568',fontFamily:'monospace',fontSize:11,padding:'8px 2px',cursor:'pointer'},
   tabActive:{color:'#00e5a0',borderBottomColor:'#00e5a0'},
   panelBody:{flex:1,overflowY:'auto',padding:14},
   emptyState:{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',gap:8,color:'#4a5568',fontFamily:'monospace',fontSize:11,textAlign:'center'},
@@ -680,4 +783,5 @@ const s={
   infoBox:{background:'rgba(59,138,255,.06)',border:'1px solid rgba(59,138,255,.15)',borderRadius:3,padding:'6px 8px',fontFamily:'monospace',fontSize:9,color:'#8899aa',lineHeight:1.6},
   logBox:{background:'#0c0e11',border:'1px solid #252b35',borderRadius:3,padding:'6px 8px',height:380,overflowY:'auto',display:'flex',flexDirection:'column',gap:0},
   liveBanner:{display:'flex',gap:12,alignItems:'center',background:'rgba(0,229,160,.05)',border:'1px solid rgba(0,229,160,.15)',borderRadius:3,padding:'5px 8px',marginBottom:10,fontFamily:'monospace',fontSize:10},
+  posBox:{background:'#0c0e11',border:'1px solid rgba(59,138,255,0.3)',borderRadius:4,padding:'8px',textAlign:'center'},
 }

@@ -181,67 +181,94 @@ async def websocket_endpoint(websocket: WebSocket):
         print(f"Client disconnected — {len(clients)} total")
 
 
-# ── Packet parser ─────────────────────────────────────────────────────────────
+# Replace the global node_packet dict and parse_packet function with this:
+
+_current_node: dict = {}
 
 def parse_packet(line: str) -> dict | None:
-    print(f"line: {line}")
+    global _current_node
+
     try:
         line = line.replace("{{{", "{").replace("}}}", "}")
         line = line.replace("{{",  "{").replace("}}",  "}")
-        if not (line.startswith("{") and line.endswith("}")):
-            if line:
-                print(f"Non-JSON: {line!r}")
-            return None
 
-        raw = json.loads(line)
+        # ── JSON path (localisation packet) ─────────────────────────────
+        if line.startswith("{") and line.endswith("}"):
+            raw = json.loads(line)
+            data = raw.get("data_buffer", [])
+            if len(data) != NUM_NODES:
+                print(f"Unexpected data_len={len(data)}, expected {NUM_NODES} — skipping")
+                return None
+            nodes = [
+                {"name": NODE_NAMES[i], "rssi": rssi, "distance": rssi_to_distance(rssi)}
+                for i, rssi in enumerate(data)
+            ]
+            raw_pos      = {"x": raw.get("raw_pos_x",      0) / 100.0, "y": raw.get("raw_pos_y",      0) / 100.0}
+            filtered_pos = {"x": raw.get("filtered_pos_x", 0) / 100.0, "y": raw.get("filtered_pos_y", 0) / 100.0}
+            velocity     = {"x": raw.get("velocity_x",     0) / 100.0, "y": raw.get("velocity_y",     0) / 100.0}
+            timestamp    = raw.get("timestamp", 0)
 
-        # ── Sniffer node packet ──────────────────────────────────────────
-        if "addr_str" in raw:
             return {
-                "type":                   "sniffer_node",
-                "addr":                   raw.get("addr_str", ""),
-                "rssi":                   raw.get("rssi", 0),
-                "tx_power":               raw.get("tx_power", 0),
-                "adv_type":               raw.get("adv_type", 0),
-                "adv_props":              raw.get("adv_props", 0),
-                "has_name":               raw.get("has_name", False),
-                "name":                   raw.get("name", ""),
-                "has_flags":              raw.get("has_flags", False),
-                "flags":                  raw.get("flags", 0),
-                "has_manufacturer_data":  raw.get("has_manufacturer_data", False),
-                "manufacturer_company_id": raw.get("manufacturer_company_id", 0),
-                "manufacturer_data":      raw.get("manufacturer_data", []),
-                "has_service_data":       raw.get("has_service_data", False),
-                "service_data_type":      raw.get("service_data_type", 0),
-                "service_data":           raw.get("service_data", []),
-                "interval":               raw.get("interval", 0),
-                "primary_phy":            raw.get("primary_phy", 0),
-                "secondary_phy":          raw.get("secondary_phy", 0),
-                "raw":                    raw.get("raw", []),
+                "type":         "rssi",
+                "nodes":        nodes,
+                "raw_position": raw_pos,
+                "position":     filtered_pos,
+                "velocity":     velocity,
+                "timestamp":    timestamp,
             }
-        
-        if "addr" in raw:
-            filtered = raw.strip("addr:")
-            print(f"filtered: {filtered}")
 
-        # ── Normal localisation packet ───────────────────────────────────
-        data = raw.get("data_buffer", [])
-        if len(data) != NUM_NODES:
-            print(f"Unexpected data_len={len(data)}, expected {NUM_NODES} — skipping")
+
+        # ── Plain-text sniffer path ──────────────────────────────────────
+        line = line.strip()
+        # Separator line — start of a new node record
+        if line.startswith("=====") or line.startswith("-----"):
+            _current_node = {"type": "sniffer_node"}
             return None
 
-        nodes = [
-            {"name": NODE_NAMES[i], "rssi": rssi, "distance": rssi_to_distance(rssi)}
-            for i, rssi in enumerate(data)
-        ]
-        raw_pos      = {"x": raw.get("raw_pos_x",      0) / 100.0, "y": raw.get("raw_pos_y",      0) / 100.0}
-        filtered_pos = {"x": raw.get("filtered_pos_x", 0) / 100.0, "y": raw.get("filtered_pos_y", 0) / 100.0}
-        return {"type": "rssi", "nodes": nodes, "raw_position": raw_pos, "position": filtered_pos}
+        if ":" not in line:
+            return None
+
+        key, _, value = line.partition(":")
+        key   = key.strip()
+        value = value.strip()
+
+        field_map = {
+            "addr":                    "addr",
+            "rssi":                    "rssi",
+            "tx_power":                "tx_power",
+            "adv_type":                "adv_type",
+            "adv_props":               "adv_props",
+            "has_name":                "has_name",
+            "name":                    "name",
+            "has_flags":               "has_flags",
+            "flags":                   "flags",
+            "has_manufacturer_data":   "has_manufacturer_data",
+            "manufacturer_company_id": "manufacturer_company_id",
+            "manufacturer_data":       "manufacturer_data",
+            "has_service_data":        "has_service_data",
+            "service_data_type":       "service_data_type",
+            "service_data":            "service_data",
+            "interval":                "interval",
+            "primary_phy":             "primary_phy",
+            "secondary_phy":           "secondary_phy",
+            "payload raw":                     "raw",
+        }
+
+        if key in field_map:
+            _current_node[field_map[key]] = value
+
+        # "raw" is the last field printed — emit the completed record
+        if key == "payload raw":
+            completed = dict(_current_node)   # snapshot, not a reference
+            _current_node = {"type": "sniffer_node"}
+            print(f"Sniffer node: {completed}")
+            return completed
+
+        return None
 
     except (json.JSONDecodeError, KeyError, TypeError) as e:
         print(f"Parse error: {e} | {line!r}")
         return None
-
 
 # ── Broadcast ─────────────────────────────────────────────────────────────────
 
@@ -290,7 +317,6 @@ async def serial_reader():
                 decoded = line.decode("utf-8", errors="ignore").strip()
                 if not decoded:
                     continue
-                print(f"Raw: {decoded}")
 
                 # Shell text output (beacon view)
                 for beacon in _beacon_parser.feed(decoded):
