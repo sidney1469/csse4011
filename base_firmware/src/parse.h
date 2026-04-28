@@ -5,7 +5,7 @@
 
 #include "central.h"
 
-#define PATH_LOSS_EXP  3.5f
+#define PATH_LOSS_EXP  3.0f
 #define MEASURED_POWER -56.0f
 
 void parse_thread(void *a, void *b, void *c);

@@ -2,8 +2,8 @@
 #include <math.h>
 #include "kalman.h"
 
-#define Q 0.1f
-#define R 2.0f
+#define Q 0.01f
+#define R 4.0f
 
 static float X[4];
 static float P[4][4];
