@@ -1,14 +1,28 @@
+/*********************************** */
+/*            sniffer.c              */
+/*********************************** */
+/* Authors                           */
+/* Sidney Neil 47441952              */
+/* Fiachra Richards  47450271        */
+/*********************************** */
+
+/********* Include Libraries ******* */
 #include <zephyr/sys/printk.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/gap.h>
 #include <string.h>
-#include "shell.h" /* for beacon_list, ibeacon_node */
+#include "shell.h"
 #include "central.h"
 #include "parse.h"
+/********************************* */
 
+/*********** Global Defines ********** */
+
+/* Time before a discovered node is considered inactive */
 #define NODE_TIMEOUT_MS 3000
 
+/* List of known BLE beacon node addresses to track in sniffer mode */
 static const bt_addr_le_t nodelist[] = {
     {.type = BT_ADDR_LE_RANDOM, .a = {{0x67, 0x34, 0x85, 0xFE, 0x75, 0xF5}}},
     {.type = BT_ADDR_LE_RANDOM, .a = {{0x86, 0x1E, 0x06, 0x87, 0x73, 0xE5}}},
@@ -25,13 +39,16 @@ static const bt_addr_le_t nodelist[] = {
     {.type = BT_ADDR_LE_RANDOM, .a = {{0x2C, 0xD7, 0xA8, 0x46, 0x3B, 0xF7}}},
 };
 
+/* Stores the address and RSSI value from a scanned BLE node */
 struct scan_result {
     bt_addr_le_t addr;
     int8_t rssi;
 };
 
+/* Queue used to pass filtered scan results to other application code */
 K_MSGQ_DEFINE(scan_msgq, sizeof(struct scan_result), 30, 4);
 
+/* Checks whether a scanned BLE address belongs to one of the known beacon nodes */
 static bool addr_match(const bt_addr_le_t *addr)
 {
     for (int i = 0; i < ARRAY_SIZE(nodelist); i++) {
@@ -39,9 +56,11 @@ static bool addr_match(const bt_addr_le_t *addr)
             return true;
         }
     }
+
     return false;
 }
 
+/* Converts BLE advertisement type values into readable strings */
 static const char *adv_type_str(uint8_t type)
 {
     switch (type) {
@@ -62,6 +81,7 @@ static const char *adv_type_str(uint8_t type)
     }
 }
 
+/* Converts BLE PHY values into readable strings */
 static const char *phy_str(uint8_t phy)
 {
     switch (phy) {
@@ -86,6 +106,7 @@ static const char *phy_str(uint8_t phy)
     }
 }
 
+/* Converts BLE advertising data field types into readable strings */
 static const char *ad_type_str(uint8_t type)
 {
     switch (type) {
@@ -128,6 +149,7 @@ static const char *ad_type_str(uint8_t type)
     }
 }
 
+/* Prints raw byte data in hexadecimal format */
 static void print_hex_bytes(const uint8_t *data, uint8_t len)
 {
     for (uint8_t i = 0; i < len; i++) {
@@ -139,6 +161,10 @@ static void print_hex_bytes(const uint8_t *data, uint8_t len)
     }
 }
 
+/*
+ * Callback used by bt_data_parse().
+ * Prints each advertising data field and decodes common field types.
+ */
 static bool print_ad_field(struct bt_data *data, void *user_data)
 {
     ARG_UNUSED(user_data);
@@ -191,6 +217,10 @@ static bool print_ad_field(struct bt_data *data, void *user_data)
     return true;
 }
 
+/*
+ * Prints detailed information about a scanned BLE advertisement.
+ * The advertising payload is also parsed into individual AD fields.
+ */
 void print_node(const struct bt_le_scan_recv_info *info, struct net_buf_simple *buf)
 {
     char addr[BT_ADDR_LE_STR_LEN];
@@ -241,7 +271,6 @@ void print_node(const struct bt_le_scan_recv_info *info, struct net_buf_simple *
     printk("\n");
 
     printk("primary_phy:   0x%02x (%s)\n", info->primary_phy, phy_str(info->primary_phy));
-
     printk("secondary_phy: 0x%02x (%s)\n", info->secondary_phy, phy_str(info->secondary_phy));
 
     if (info->interval == 0) {
@@ -258,8 +287,8 @@ void print_node(const struct bt_le_scan_recv_info *info, struct net_buf_simple *
     printk("parsed AD fields:\n");
 
     /*
-     * bt_data_parse() consumes/pulls from the buffer, so parse a shallow copy
-     * and leave the original scan buffer untouched.
+     * bt_data_parse() consumes from the buffer, so parse a shallow copy
+     * and leave the original scan buffer unchanged.
      */
     struct net_buf_simple ad = *buf;
     bt_data_parse(&ad, print_ad_field, NULL);
@@ -267,9 +296,12 @@ void print_node(const struct bt_le_scan_recv_info *info, struct net_buf_simple *
     printk("===================================\n\n");
 }
 
+/*
+ * BLE scan receive callback for sniffer mode.
+ * All scanned packets are printed, while known nodes are also queued for processing.
+ */
 void scan_recv(const struct bt_le_scan_recv_info *info, struct net_buf_simple *buf)
 {
-
     print_node(info, buf);
 
     if (!addr_match(info->addr)) {
@@ -283,13 +315,17 @@ void scan_recv(const struct bt_le_scan_recv_info *info, struct net_buf_simple *b
     k_msgq_put(&scan_msgq, &result, K_NO_WAIT);
 }
 
+/* Registers the receive callback used by Zephyr BLE scanning */
 struct bt_le_scan_cb scan_callbacks = {
     .recv = scan_recv,
 };
 
+/*
+ * Sniffer thread entry point.
+ * The thread remains active while sniffer mode is enabled.
+ */
 void sniffer_thread(void *a, void *b, void *c)
 {
-
     printk("Sniffer thread started\n");
 
     while (sniffer) {

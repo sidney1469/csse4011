@@ -1,3 +1,12 @@
+/*********************************** */
+/*             sensor.c              */
+/*********************************** */
+/* Authors                           */
+/* Sidney Neil 47441952              */
+/* Fiachra Richards  47450271        */
+/*********************************** */
+
+/********* Include Libraries ******* */
 #include <zephyr/sys/printk.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
@@ -5,10 +14,14 @@
 #include <string.h>
 
 #include "sensor.h"
+/********************************* */
+
+/*********** Global Defines ********** */
 
 #define NAME_LEN        30
 #define NODE_TIMEOUT_MS 3000
 
+/* Known BLE beacon node addresses used for RSSI scanning */
 static const bt_addr_le_t nodelist[] = {
     {.type = BT_ADDR_LE_RANDOM, .a = {{0x67, 0x34, 0x85, 0xFE, 0x75, 0xF5}}},
     {.type = BT_ADDR_LE_RANDOM, .a = {{0x86, 0x1E, 0x06, 0x87, 0x73, 0xE5}}},
@@ -25,17 +38,17 @@ static const bt_addr_le_t nodelist[] = {
     {.type = BT_ADDR_LE_RANDOM, .a = {{0x2C, 0xD7, 0xA8, 0x46, 0x3B, 0xF7}}},
 };
 
+/* Stores one scanned beacon address and its RSSI reading */
 struct scan_result {
     bt_addr_le_t addr;
     int8_t rssi;
 };
 
-struct k_msgq scan_msgq;
-struct k_msgq rssi_msgq;
-
+/* Queues for scan results and the current RSSI table */
 K_MSGQ_DEFINE(scan_msgq, sizeof(struct scan_result), 30, 4);
 K_MSGQ_DEFINE(rssi_msgq, 13 * sizeof(int8_t), 1, 4);
 
+/* Checks whether a scanned address is one of the configured beacon nodes */
 static bool addr_match(const bt_addr_le_t *addr)
 {
     for (int i = 0; i < ARRAY_SIZE(nodelist); i++) {
@@ -43,9 +56,11 @@ static bool addr_match(const bt_addr_le_t *addr)
             return true;
         }
     }
+
     return false;
 }
 
+/* Returns the table index for a known beacon address */
 static int addr_index(const bt_addr_le_t *addr)
 {
     for (int i = 0; i < ARRAY_SIZE(nodelist); i++) {
@@ -53,9 +68,14 @@ static int addr_index(const bt_addr_le_t *addr)
             return i;
         }
     }
+
     return -1;
 }
 
+/*
+ * BLE scan receive callback.
+ * Valid beacon advertisements are copied into the scan queue for processing.
+ */
 static void scan_recv(const struct bt_le_scan_recv_info *info, struct net_buf_simple *buf)
 {
     if (!addr_match(info->addr)) {
@@ -69,10 +89,16 @@ static void scan_recv(const struct bt_le_scan_recv_info *info, struct net_buf_si
     k_msgq_put(&scan_msgq, &result, K_NO_WAIT);
 }
 
+/* Scan callback registration used by the Zephyr BLE stack */
 static struct bt_le_scan_cb scan_callbacks = {
     .recv = scan_recv,
 };
 
+/*
+ * Sensing thread.
+ * Scans for known BLE beacons, updates the RSSI table, and queues the latest
+ * values for the communications thread.
+ */
 void sensing_thread(void *a, void *b, void *c)
 {
     bt_enable(NULL);
@@ -105,10 +131,11 @@ void sensing_thread(void *a, void *b, void *c)
 
         uint64_t curr_time = k_uptime_get();
 
+        /* Clear RSSI values for beacons that have not been seen recently */
         for (int i = 0; i < 13; i++) {
             if (last_seen[i] != 0 && (curr_time - last_seen[i]) > NODE_TIMEOUT_MS) {
                 rssi_table[i] = 0;
-                last_seen[i] = 0; /* reset so we don't zero repeatedly */
+                last_seen[i] = 0;
             }
         }
 

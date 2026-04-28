@@ -1,3 +1,12 @@
+/*********************************** */
+/*        least_squares.c            */
+/*********************************** */
+/* Authors                           */
+/* Sidney Neil 47441952              */
+/* Fiachra Richards  47450271        */
+/*********************************** */
+
+/********* Include Libraries ******* */
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
@@ -5,7 +14,12 @@
 
 #include "least_squares.h"
 #include "matrix.h"
+/********************************* */
 
+/*
+ * Builds the weighted least-squares system A and b from beacon coordinates
+ * and estimated distances. The closest beacon is used as the reference point.
+ */
 void build_Ab(float beacon_coords[][N_AXIS], float displacements[N_BEACONS], float A[][N_AXIS],
               float b[], int num_beacons)
 {
@@ -19,6 +33,7 @@ void build_Ab(float beacon_coords[][N_AXIS], float displacements[N_BEACONS], flo
         disp_copy[i] = displacements[i];
     }
 
+    /* Use the beacon with the smallest estimated distance as the reference */
     int ref = 0;
     float min_r = disp_copy[0];
 
@@ -28,6 +43,8 @@ void build_Ab(float beacon_coords[][N_AXIS], float displacements[N_BEACONS], flo
             ref = i;
         }
     }
+
+    /* Move the reference beacon to the final position in the working arrays */
     if (ref != num_beacons - 1) {
         for (int j = 0; j < N_AXIS; j++) {
             float tmp = coords_copy[ref][j];
@@ -73,9 +90,12 @@ void build_Ab(float beacon_coords[][N_AXIS], float displacements[N_BEACONS], flo
     }
 }
 
+/*
+ * Solves the least-squares system using the normal equation:
+ * pos = (A^T A)^-1 A^T b
+ */
 int lstsq_solve(float A[][N_AXIS], float b[], float pos[N_AXIS], int num_beacons)
 {
-
     // At = Aᵀ  (2x12)
     float At[N_AXIS * num_beacons];
     transpose_matrix((float *)A, At, num_beacons, N_AXIS);
@@ -102,11 +122,16 @@ int lstsq_solve(float A[][N_AXIS], float b[], float pos[N_AXIS], int num_beacons
     return 0;
 }
 
+/* Converts RSSI into an estimated distance using the log-distance path loss model */
 float rssi_to_distance(float rssi, float measured_power, float path_loss_exp)
 {
     return powf(10.0f, (measured_power - rssi) / (10.0f * path_loss_exp));
 }
 
+/*
+ * Estimates the receiver position from beacon coordinates and RSSI readings.
+ * Invalid RSSI values are ignored, and at least three valid beacons are required.
+ */
 int localise(float beacon_coords[N_BEACONS][N_AXIS], int8_t rssi[N_BEACONS], float measured_power,
              float path_loss_exp, float pos[N_AXIS])
 {
@@ -118,10 +143,12 @@ int localise(float beacon_coords[N_BEACONS][N_AXIS], int8_t rssi[N_BEACONS], flo
         if (rssi[i] >= -30 || rssi[i] < -100) {
             continue;
         }
+
         valid_coords[valid_count][0] = beacon_coords[i][0];
         valid_coords[valid_count][1] = beacon_coords[i][1];
         displacements[valid_count] =
             rssi_to_distance((float)rssi[i], measured_power, path_loss_exp);
+
         valid_count++;
     }
 
@@ -132,6 +159,7 @@ int localise(float beacon_coords[N_BEACONS][N_AXIS], int8_t rssi[N_BEACONS], flo
 
     float A[valid_count][N_AXIS];
     float b[valid_count];
+
     build_Ab(valid_coords, displacements, A, b, valid_count);
 
     int err = lstsq_solve(A, b, pos, valid_count - 1);

@@ -1,3 +1,11 @@
+/*********************************** */
+/*            parse.c                */
+/*********************************** */
+/* Authors                           */
+/* Sidney Neil 47441952              */
+/* Fiachra Richards  47450271        */
+/*********************************** */
+
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -14,6 +22,7 @@
 #include "kalman.h"
 #include "least_squares.h"
 
+/* JSON description used to encode localisation results for output */
 static const struct json_obj_descr data_send_descr[] = {
     JSON_OBJ_DESCR_ARRAY(struct data_send, data_buffer, NUS_MAX_DATA_LEN, data_len, JSON_TOK_INT),
     JSON_OBJ_DESCR_PRIM(struct data_send, raw_pos_x, JSON_TOK_NUMBER),
@@ -25,6 +34,10 @@ static const struct json_obj_descr data_send_descr[] = {
     JSON_OBJ_DESCR_PRIM(struct data_send, timestamp, JSON_TOK_INT64),
 };
 
+/*
+ * Converts received Bluetooth data and localisation results into JSON.
+ * Position and velocity values are scaled before encoding to avoid sending floats.
+ */
 void parse_data_into_json(struct bt_data_received data, float raw_pos[N_AXIS],
                           float filtered_pos[N_AXIS], float velocity[N_AXIS], int64_t timestamp)
 {
@@ -47,6 +60,11 @@ void parse_data_into_json(struct bt_data_received data, float raw_pos[N_AXIS],
     printk("%s\n", buffer);
 }
 
+/*
+ * Parser thread for received Bluetooth data.
+ * RSSI data is converted into a raw position estimate, then filtered using
+ * the Kalman filter before being output as JSON.
+ */
 void parse_thread(void *a, void *b, void *c)
 {
     struct bt_data_received data;
@@ -62,20 +80,24 @@ void parse_thread(void *a, void *b, void *c)
     float dt;
 
     while (1) {
+        /* Wait for new Bluetooth data from the central thread */
         k_msgq_get(&bt_data_msgq, &data, K_FOREVER);
 
         curr_time_ms = k_uptime_get();
         dt = (curr_time_ms - last_time_ms) / 1000.0f;
         last_time_ms = curr_time_ms;
 
+        /* Load the current beacon coordinates configured through the shell */
         get_beacons_coords(coords, N_BEACONS);
 
+        /* Disable RSSI readings for beacons that have not been configured */
         for (int i = 0; i < N_BEACONS; i++) {
             if (coords[i][0] == -1.0f) {
                 data.data_buffer[i] = 0;
             }
         }
 
+        /* Estimate position from beacon coordinates and RSSI values */
         int beacons_used =
             localise(coords, data.data_buffer, MEASURED_POWER, PATH_LOSS_EXP, raw_pos);
 
@@ -90,8 +112,10 @@ void parse_thread(void *a, void *b, void *c)
                 kalman_update(raw_pos[0], raw_pos[1]);
                 kalman_get_position(&filtered_pos[0], &filtered_pos[1]);
                 kalman_get_velocity(&velocity[0], &velocity[1]);
+
                 parse_data_into_json(data, raw_pos, filtered_pos, velocity, curr_time_ms);
             } else {
+                /* Initialise the filter with the first valid position estimate */
                 init_filter(raw_pos[0], raw_pos[1]);
                 filter_initialised = true;
             }

@@ -1,10 +1,23 @@
+/*********************************** */
+/*             shell.c               */
+/*********************************** */
+/* Authors                           */
+/* Sidney Neil 47441952              */
+/* Fiachra Richards  47450271        */
+/*********************************** */
+
+/********* Include Libraries ******* */
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/slist.h>
 #include <stdlib.h>
 #include "shell.h"
+/********************************* */
 
-
+/*
+ * Default iBeacon configuration used to initialise the system.
+ * Each beacon stores its ID information, position, and neighbouring nodes.
+ */
 static const struct {
     char name[32];
     char mac[18];
@@ -30,11 +43,13 @@ static const struct {
     {"4011-M", "F7:3B:46:A8:D7:2C", 49247, 52925, 3.5, 1.7, "", ""},
 };
 
+/* Linked list used to store active beacon nodes */
 sys_slist_t beacon_list = SYS_SLIST_STATIC_INIT(&beacon_list);
 
+/* Global flag used to toggle between central mode and sniffer mode */
 int sniffer = 0;
 
-/* beacon add <name> <mac> <major> <minor> <x> <y> <z> <left> <right> */
+/* Adds a new iBeacon node to the beacon list from shell arguments */
 static int cmd_beacon_add(const struct shell *sh, size_t argc, char **argv)
 {
     struct ibeacon_node *node = k_malloc(sizeof(struct ibeacon_node));
@@ -60,7 +75,7 @@ static int cmd_beacon_add(const struct shell *sh, size_t argc, char **argv)
     return 0;
 }
 
-/* beacon remove <name> */
+/* Removes an iBeacon node from the beacon list by name */
 static int cmd_beacon_remove(const struct shell *sh, size_t argc, char **argv)
 {
     struct ibeacon_node *node;
@@ -79,7 +94,7 @@ static int cmd_beacon_remove(const struct shell *sh, size_t argc, char **argv)
     return -ENOENT;
 }
 
-
+/* Toggles sniffer mode on or off */
 static int cmd_beacon_sniffer(const struct shell *sh, size_t argc, char **argv)
 {
     sniffer ^= 1;
@@ -87,7 +102,7 @@ static int cmd_beacon_sniffer(const struct shell *sh, size_t argc, char **argv)
     return 0;
 }
 
-/* beacon view <name> OR beacon view -a */
+/* Displays either one beacon or all beacons currently stored in the list */
 static int cmd_beacon_view(const struct shell *sh, size_t argc, char **argv)
 {
     struct ibeacon_node *node;
@@ -114,6 +129,7 @@ static int cmd_beacon_view(const struct shell *sh, size_t argc, char **argv)
     return 0;
 }
 
+/* Loads the default beacon configuration into the linked list */
 void init_default_beacons(void)
 {
     for (int i = 0; i < 13; i++) {
@@ -122,6 +138,7 @@ void init_default_beacons(void)
             printk("beacon_init_defaults: out of memory at %d\n", i);
             return;
         }
+
         strncpy(node->name, defaults[i].name, sizeof(node->name) - 1);
         strncpy(node->mac, defaults[i].mac, sizeof(node->mac) - 1);
         node->major = defaults[i].major;
@@ -131,12 +148,17 @@ void init_default_beacons(void)
         strncpy(node->left_neighbour, defaults[i].left_neighbour, sizeof(node->left_neighbour) - 1);
         strncpy(node->right_neighbour, defaults[i].right_neighbour,
                 sizeof(node->right_neighbour) - 1);
+
         sys_slist_append(&beacon_list, &node->node);
     }
 
     printk("Beacon list initialised with 13 nodes\n");
 }
 
+/*
+ * Copies beacon coordinates from the linked list into an indexed array.
+ * Missing beacons are initialised to -1.0f so they can be ignored later.
+ */
 int get_beacons_coords(float coords[][2], int max_beacons)
 {
     for (int i = 0; i < max_beacons; i++) {
@@ -160,6 +182,7 @@ int get_beacons_coords(float coords[][2], int max_beacons)
     return found;
 }
 
+/* Shell command registration for beacon management */
 SHELL_STATIC_SUBCMD_SET_CREATE(
     sub_beacon,
     SHELL_CMD_ARG(add, NULL,
@@ -175,9 +198,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
                   "Usage: beacon view <name> | beacon view -a",
                   cmd_beacon_view, 2, 0),
     SHELL_CMD_ARG(sniffer, NULL,
-              "Toggle Sniffer Node.\n"
-              "Usage: beacon sniffer",
-              cmd_beacon_sniffer, 1, 0), 
+                  "Toggle Sniffer Node.\n"
+                  "Usage: beacon sniffer",
+                  cmd_beacon_sniffer, 1, 0),
     SHELL_SUBCMD_SET_END);
 
+/* Register the top-level beacon shell command */
 SHELL_CMD_REGISTER(beacon, &sub_beacon, "Ibeacon node management", NULL);

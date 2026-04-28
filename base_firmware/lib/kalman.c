@@ -1,13 +1,34 @@
+/*********************************** */
+/*             kalman.c              */
+/*********************************** */
+/* Authors                           */
+/* Sidney Neil 47441952              */
+/* Fiachra Richards  47450271        */
+/*********************************** */
+
+/********* Include Libraries ******* */
 #include <string.h>
 #include <math.h>
 #include "kalman.h"
+/********************************* */
 
-#define Q 0.01f // Process noise variance (Uncertainty in model)
-#define R 4.0f  // Measurement noise variance (m^2) (Uncertainty in measurement)
+/*********** Global Defines ********** */
 
-static float X[4]; // X = [x, y, vx, vy]
+/* Kalman filter tuning constants */
+#define Q 0.01f // Process noise variance
+#define R 4.0f  // Measurement noise variance
+
+/* State vector: [x, y, vx, vy] */
+static float X[4];
+
+/* State covariance matrix */
 static float P[4][4];
 
+/*
+ * Initialises the Kalman filter state.
+ * The initial position is set from the first valid measurement, while velocity
+ * starts at zero.
+ */
 void init_filter(float x0, float y0)
 {
     memset(X, 0, sizeof(X));
@@ -16,11 +37,15 @@ void init_filter(float x0, float y0)
 
     memset(P, 0, sizeof(P));
 
-    // Set initial uncertainty (Can be toggled)
-    P[0][0] = P[1][1] = 1.0f; // position
-    P[2][2] = P[3][3] = 0.1f; // velocity
+    /* Initial uncertainty for position and velocity estimates */
+    P[0][0] = P[1][1] = 1.0f;
+    P[2][2] = P[3][3] = 0.1f;
 }
 
+/*
+ * Predicts the next filter state using a constant velocity motion model.
+ * The covariance is also updated to account for increasing uncertainty over time.
+ */
 void kalman_predict(float dt)
 {
     float F[4][4] = {
@@ -30,16 +55,14 @@ void kalman_predict(float dt)
         {0, 0, 0, 1},
     };
 
-    // State transition: F @ x
-    // Projects the current state forward in time by dt
+    /* Predict next state: X = F * X */
     float X_temp[4];
     multiply_matrix((float *)F, X, X_temp, 4, 4, 1);
     for (int i = 0; i < 4; i++) {
         X[i] = X_temp[i];
     }
-    // P = F * P * F_T + Q
-    // Covariance matrix: uncertainty in estimate - should grow here and shrink
-    // during update process
+
+    /* Predict covariance: P = F * P * F^T */
     float F_T[4][4];
     float FP[4][4];
     float FPF_T[4][4];
@@ -49,41 +72,41 @@ void kalman_predict(float dt)
     multiply_matrix((float *)F, (float *)P, (float *)FP, 4, 4, 4);
     multiply_matrix((float *)FP, (float *)F_T, (float *)FPF_T, 4, 4, 4);
 
-    // Write back into P and add Q
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
             P[i][j] = FPF_T[i][j];
         }
     }
 
-    // Add process noise Q
+    /* Add process noise based on elapsed time */
     float dt2 = dt * dt;
     float dt3 = dt2 * dt;
     float dt4 = dt2 * dt2;
 
-    // Position-position
     P[0][0] += Q * dt4 / 4.0f;
     P[1][1] += Q * dt4 / 4.0f;
-    // Velocity-velocity
     P[2][2] += Q * dt2;
     P[3][3] += Q * dt2;
-    // Position-velocity cross terms
     P[0][2] += Q * dt3 / 2.0f;
     P[2][0] += Q * dt3 / 2.0f;
     P[1][3] += Q * dt3 / 2.0f;
     P[3][1] += Q * dt3 / 2.0f;
 }
 
+/*
+ * Updates the predicted state using a new measured position.
+ * The Kalman gain controls how strongly the filter trusts the measurement
+ * compared with the predicted state.
+ */
 void kalman_update(float x_meas, float y_meas)
 {
-    // H: state-to-measurement matrix (3x6)
+    /* Measurement matrix maps state [x, y, vx, vy] to measured position [x, y] */
     float H[2][4] = {
         {1, 0, 0, 0},
         {0, 1, 0, 0},
     };
 
-    // y = z - H*x
-    // Difference between what was measured and what the filter predicted
+    /* Measurement residual: y = z - H * X */
     float HX[2];
     multiply_matrix((float *)H, X, HX, 2, 4, 1);
     float y[2] = {
@@ -91,9 +114,7 @@ void kalman_update(float x_meas, float y_meas)
         y_meas - HX[1],
     };
 
-    // S = H*P*H_T + R*I
-    // Total uncertainty in measurement
-    // Combines uncertainty from the state estimate and the measurement noise R
+    /* Innovation covariance: S = H * P * H^T + R */
     float H_T[4][2];
     float HP[2][4];
     float HPH_T[2][2];
@@ -102,33 +123,30 @@ void kalman_update(float x_meas, float y_meas)
     multiply_matrix((float *)H, (float *)P, (float *)HP, 2, 4, 4);
     multiply_matrix((float *)HP, (float *)H_T, (float *)HPH_T, 2, 4, 4);
 
-    // Add R on diagonal
     HPH_T[0][0] += R;
     HPH_T[1][1] += R;
 
-    // S_inv = invert(S)
+    /* Skip update if the innovation covariance cannot be inverted */
     float S_inv[2][2];
     if (invert_2x2_matrix(HPH_T, S_inv) != 0) {
-        return; // singular, skip update
+        return;
     }
 
-    // K = P*H_T*S_inv  (4x2 Kalman gain)
-    // Determines how much the model is trusted. High K = trust measurement
-    // more, Low K = trust prediction more.
+    /* Kalman gain: K = P * H^T * S^-1 */
     float PH_T[4][2];
     float K[4][2];
 
     multiply_matrix((float *)P, (float *)H_T, (float *)PH_T, 4, 4, 2);
     multiply_matrix((float *)PH_T, (float *)S_inv, (float *)K, 4, 2, 2);
 
-    // x = x + K*y
+    /* Correct state estimate: X = X + K * y */
     float Ky[4];
     multiply_matrix((float *)K, y, Ky, 4, 2, 1);
     for (int i = 0; i < 4; i++) {
         X[i] += Ky[i];
     }
 
-    // P = IKH * P * IKH_T + K * R * K_T
+    /* Update covariance using the Joseph form for improved numerical stability */
     float KH[4][4];
     multiply_matrix((float *)K, (float *)H, (float *)KH, 4, 2, 4);
 
@@ -165,12 +183,14 @@ void kalman_update(float x_meas, float y_meas)
     }
 }
 
+/* Returns the current filtered position estimate */
 void kalman_get_position(float *x, float *y)
 {
     *x = X[0];
     *y = X[1];
 }
 
+/* Returns the current filtered velocity estimate */
 void kalman_get_velocity(float *x, float *y)
 {
     *x = X[2];

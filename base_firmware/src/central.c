@@ -1,3 +1,12 @@
+/*********************************** */
+/*            central.c              */
+/*********************************** */
+/* Authors                           */
+/* Sidney Neil 47441952              */
+/* Fiachra Richards  47450271        */
+/*********************************** */
+
+/********* Include Libraries ******* */
 #include <zephyr/types.h>
 #include <stddef.h>
 #include <errno.h>
@@ -13,31 +22,39 @@
 #include "central.h"
 #include "shell.h"
 #include "sniffer.h"
+/********************************* */
+
+/*********** Global Defines ********** */
 
 static void start_scan(void);
 
+/* Active BLE connection used by the central device */
 static struct bt_conn *default_conn;
 
+/* Message queue for passing received Bluetooth data to the parser */
 char data_msgq_buffer[10 * sizeof(struct bt_data_received)];
-
 K_MSGQ_DEFINE(bt_data_msgq, sizeof(struct bt_data_received), 10, 4);
 
+/* Stack allocation for sniffer mode thread */
 K_THREAD_STACK_DEFINE(sniffer_stack_area, SNIFFER_STACK_SIZE);
 
-/* Target peripheral MAC address (LSB first) */
+/* Target peripheral MAC addresses */
 static const bt_addr_t target_mac_1 = {.val = {0x65, 0xA9, 0xB3, 0x5F, 0x9A, 0xC5}};
-
 static const bt_addr_t target_mac_2 = {.val = {0x15, 0xFB, 0xFA, 0xD7, 0xC4, 0xC1}};
 
-/* NUS UUIDs */
+/* Nordic UART Service UUIDs */
 static struct bt_uuid_128 nus_svc_uuid = BT_UUID_INIT_128(BT_UUID_NUS_SRV_VAL);
 static struct bt_uuid_128 nus_tx_uuid = BT_UUID_INIT_128(BT_UUID_NUS_TX_CHAR_VAL);
 static struct bt_uuid_128 nus_rx_uuid = BT_UUID_INIT_128(BT_UUID_NUS_RX_CHAR_VAL);
 
-/* GATT subscribe params — must persist for lifetime of subscription */
+/* GATT parameters must persist while discovery/subscription is active */
 static struct bt_gatt_subscribe_params subscribe_params;
 static struct bt_gatt_discover_params discover_params;
 
+/*
+ * Handles incoming NUS TX notifications.
+ * Received data is copied into a queue so another thread can process it.
+ */
 static uint8_t on_received(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
                            const void *data, uint16_t length)
 {
@@ -51,10 +68,12 @@ static uint8_t on_received(struct bt_conn *conn, struct bt_gatt_subscribe_params
 
     struct bt_data_received new_data = {0};
     uint16_t c = 0;
+
     for (int i = 0; i < length; i++) {
         new_data.data_buffer[i] = (int8_t)bytes[i];
         c++;
     }
+
     new_data.data_len = c;
 
     k_msgq_put(&bt_data_msgq, &new_data, K_NO_WAIT);
@@ -62,6 +81,10 @@ static uint8_t on_received(struct bt_conn *conn, struct bt_gatt_subscribe_params
     return BT_GATT_ITER_CONTINUE;
 }
 
+/*
+ * Performs GATT discovery for the Nordic UART Service.
+ * Once the TX characteristic is found, notifications are enabled.
+ */
 static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                              struct bt_gatt_discover_params *params)
 {
@@ -82,6 +105,7 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
 
     if (!bt_uuid_cmp(chrc->uuid, &nus_tx_uuid.uuid)) {
         printk("Found NUS TX Characteristic\n");
+
         subscribe_params.notify = on_received;
         subscribe_params.value = BT_GATT_CCC_NOTIFY;
         subscribe_params.value_handle = chrc->value_handle;
@@ -102,6 +126,7 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
     return BT_GATT_ITER_CONTINUE;
 }
 
+/* Starts service discovery on the connected peripheral */
 static void start_discovery(struct bt_conn *conn)
 {
     discover_params.uuid = &nus_svc_uuid.uuid;
@@ -116,6 +141,10 @@ static void start_discovery(struct bt_conn *conn)
     }
 }
 
+/*
+ * Scan callback for central mode.
+ * Filters discovered devices by advertisement type and target MAC address.
+ */
 static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
                          struct net_buf_simple *ad)
 {
@@ -149,6 +178,7 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
     }
 }
 
+/* Starts passive BLE scanning in central mode */
 static void start_scan(void)
 {
     int err = bt_le_scan_start(BT_LE_SCAN_PASSIVE, device_found);
@@ -156,11 +186,13 @@ static void start_scan(void)
         printk("Scanning failed to start: %d\n", err);
         return;
     }
+
     printk("Scanning started\n");
 }
 
 /* ── Connection callbacks ────────────────────────────────────────────────── */
 
+/* Handles successful and failed BLE connection attempts */
 static void connected(struct bt_conn *conn, uint8_t err)
 {
     char addr[BT_ADDR_LE_STR_LEN];
@@ -182,6 +214,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
     start_discovery(conn);
 }
 
+/* Cleans up the active connection and returns to scanning */
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
     char addr[BT_ADDR_LE_STR_LEN];
@@ -199,20 +232,24 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
     start_scan();
 }
 
+/* Register connection callbacks with the Zephyr Bluetooth stack */
 BT_CONN_CB_DEFINE(conn_callbacks) = {
     .connected = connected,
     .disconnected = disconnected,
 };
 
 /* ── Thread entry ────────────────────────────────────────────────────────── */
+
 k_tid_t tid;
 int enabled = 0;
 
+/* Registers scan callbacks used by sniffer mode */
 void sniffer_cb_register(void)
 {
     bt_le_scan_cb_register(&scan_callbacks);
 }
 
+/* Default passive scan parameters */
 struct bt_le_scan_param scan_param = {
     .type = BT_LE_SCAN_TYPE_PASSIVE,
     .options = BT_LE_SCAN_OPT_FILTER_DUPLICATE,
@@ -220,6 +257,10 @@ struct bt_le_scan_param scan_param = {
     .window = BT_GAP_SCAN_FAST_WINDOW,
 };
 
+/*
+ * Main Bluetooth thread.
+ * Runs in central mode by default and switches to sniffer mode when requested.
+ */
 void central_thread(void *a, void *b, void *c)
 {
     int err = bt_enable(NULL);
@@ -227,6 +268,7 @@ void central_thread(void *a, void *b, void *c)
         printk("Bluetooth init failed: %d\n", err);
         return;
     }
+
     printk("Bluetooth initialized\n");
     start_scan();
 
@@ -245,18 +287,20 @@ void central_thread(void *a, void *b, void *c)
 
                 bt_le_scan_cb_register(&scan_callbacks);
 
-                /* start scan with no legacy callback for sniffer mode */
+                /* Sniffer mode uses scan callbacks instead of the central device_found callback */
                 struct bt_le_scan_param scan_param = {
                     .type = BT_LE_SCAN_TYPE_PASSIVE,
                     .options = BT_LE_SCAN_OPT_NONE,
                     .interval = 0x0100,
                     .window = BT_GAP_SCAN_FAST_WINDOW,
                 };
+
                 bt_le_scan_start(&scan_param, NULL);
 
                 tid = k_thread_create(&sniffer_thread_data, sniffer_stack_area,
                                       K_THREAD_STACK_SIZEOF(sniffer_stack_area), sniffer_thread,
                                       NULL, NULL, NULL, SNIFFER_PRIORITY, 0, K_NO_WAIT);
+
                 enabled = 1;
                 printk("Sniffer mode enabled\n");
             }
@@ -276,10 +320,11 @@ void central_thread(void *a, void *b, void *c)
                     continue;
                 }
 
-                start_scan(); /* back to central mode with device_found */
+                start_scan();
                 printk("Central mode enabled\n");
             }
         }
+
         k_sleep(K_MSEC(1000));
     }
 }
