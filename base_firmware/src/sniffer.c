@@ -9,6 +9,11 @@
 
 #define NODE_TIMEOUT_MS 3000
 
+har data_msgq_buffer[10 * sizeof(struct bt_data_received)];
+
+// At file scope, replaces the manual init entirely
+K_MSGQ_DEFINE(scan_msgq, sizeof(struct ble_scan_node), 16, 4);
+
 static const bt_addr_le_t nodelist[] = {
     {.type = BT_ADDR_LE_RANDOM, .a = {{0x67, 0x34, 0x85, 0xFE, 0x75, 0xF5}}},
     {.type = BT_ADDR_LE_RANDOM, .a = {{0x86, 0x1E, 0x06, 0x87, 0x73, 0xE5}}},
@@ -53,17 +58,154 @@ static int addr_index(const bt_addr_le_t *addr)
     return -1;
 }
 
-void scan_recv(const struct bt_le_scan_recv_info *info, struct net_buf_simple *buf)
+static size_t copy_clamped(uint8_t *dst, size_t dst_max,
+                           const uint8_t *src, size_t src_len)
+{
+    size_t n = src_len;
+
+    if (n > dst_max) {
+        n = dst_max;
+    }
+
+    if (n > 0) {
+        memcpy(dst, src, n);
+    }
+
+    return n;
+}
+
+static bool parse_ad_field(struct bt_data *data, void *user_data)
+{
+    struct ble_scan_node *node = user_data;
+
+    /* Store generic AD field */
+    if (node->ad_field_count < BLE_NODE_MAX_AD_FIELDS) {
+        struct ble_ad_field *field = &node->ad_fields[node->ad_field_count++];
+
+        field->type = data->type;
+        field->len = copy_clamped(field->data,
+                                  sizeof(field->data),
+                                  data->data,
+                                  data->data_len);
+    }
+
+    /* Store common parsed fields */
+    switch (data->type) {
+    case BT_DATA_NAME_COMPLETE:
+    case BT_DATA_NAME_SHORTENED: {
+        size_t n = data->data_len;
+
+        if (n >= BLE_NODE_NAME_MAX_LEN) {
+            n = BLE_NODE_NAME_MAX_LEN - 1;
+        }
+
+        memcpy(node->name, data->data, n);
+        node->name[n] = '\0';
+        node->has_name = true;
+        break;
+    }
+
+    case BT_DATA_FLAGS:
+        if (data->data_len >= 1) {
+            node->flags = data->data[0];
+            node->has_flags = true;
+        }
+        break;
+
+    case BT_DATA_TX_POWER:
+        if (data->data_len >= 1) {
+            node->adv_tx_power = (int8_t)data->data[0];
+            node->has_adv_tx_power = true;
+        }
+        break;
+
+    case BT_DATA_GAP_APPEARANCE:
+        if (data->data_len >= 2) {
+            node->appearance = data->data[0] | (data->data[1] << 8);
+            node->has_appearance = true;
+        }
+        break;
+
+    case BT_DATA_MANUFACTURER_DATA:
+        node->has_manufacturer_data = true;
+
+        if (data->data_len >= 2) {
+            node->manufacturer_company_id =
+                data->data[0] | (data->data[1] << 8);
+
+            node->manufacturer_data_len =
+                copy_clamped(node->manufacturer_data,
+                             sizeof(node->manufacturer_data),
+                             data->data + 2,
+                             data->data_len - 2);
+        } else {
+            node->manufacturer_company_id = 0;
+            node->manufacturer_data_len =
+                copy_clamped(node->manufacturer_data,
+                             sizeof(node->manufacturer_data),
+                             data->data,
+                             data->data_len);
+        }
+        break;
+
+    case BT_DATA_SVC_DATA16:
+    case BT_DATA_SVC_DATA32:
+    case BT_DATA_SVC_DATA128:
+        node->has_service_data = true;
+        node->service_data_type = data->type;
+        node->service_data_len =
+            copy_clamped(node->service_data,
+                         sizeof(node->service_data),
+                         data->data,
+                         data->data_len);
+        break;
+
+    default:
+        break;
+    }
+
+    return true;
+}
+
+static void fill_ble_scan_node(struct ble_scan_node *node,
+                               const struct bt_le_scan_recv_info *info,
+                               struct net_buf_simple *buf)
+{
+    memset(node, 0, sizeof(*node));
+
+    bt_addr_le_copy(&node->addr, info->addr);
+
+    node->rssi = info->rssi;
+    node->tx_power = info->tx_power;
+
+    node->sid = info->sid;
+    node->adv_type = info->adv_type;
+    node->adv_props = info->adv_props;
+    node->interval = info->interval;
+    node->primary_phy = info->primary_phy;
+    node->secondary_phy = info->secondary_phy;
+
+    node->raw_len = copy_clamped(node->raw,
+                                 sizeof(node->raw),
+                                 buf->data,
+                                 buf->len);
+
+    struct net_buf_simple ad = *buf;
+    bt_data_parse(&ad, parse_ad_field, node);
+}
+
+void scan_recv(const struct bt_le_scan_recv_info *info,
+               struct net_buf_simple *buf)
 {
     if (!addr_match(info->addr)) {
         return;
     }
 
-    struct scan_result result;
-    bt_addr_le_copy(&result.addr, info->addr);
-    result.rssi = info->rssi;
+    struct ble_scan_node node;
 
-    k_msgq_put(&scan_msgq, &result, K_NO_WAIT);
+    fill_ble_scan_node(&node, info, buf);
+
+    k_msgq_put(&scan_msgq, &node, K_NO_WAIT);
 }
 
 struct bt_le_scan_cb scan_callbacks = {
@@ -77,36 +219,7 @@ void sniffer_thread(void *a, void *b, void *c)
     printk("Sniffer thread started\n");
 
     while (sniffer) {
-        if (k_msgq_get(&scan_msgq, &result, K_MSEC(100)) != 0) {
-            continue;
-        }
-
-        int idx = addr_index(&result.addr);
-        if (idx < 0 || idx >= 13) {
-            continue;
-        }
-
-        /* find the beacon name from the linked list */
-        struct ibeacon_node *node;
-        char beacon_name[32] = "unknown";
-        SYS_SLIST_FOR_EACH_CONTAINER(&beacon_list, node, node) {
-            if ((node->name[5] - 'A') == idx) {
-                strncpy(beacon_name, node->name, sizeof(beacon_name) - 1);
-                break;
-            }
-        }
-
-        printk("Beacon %s RSSI: %d\n", beacon_name, result.rssi);
-
-        /* encode and push to bt_data_msgq */
-        struct bt_data_received msg = {0};
-        int len = snprintf((char *)msg.data_buffer, sizeof(msg.data_buffer),
-                           "{\"beacon\":\"%s\",\"rssi\":%d}",
-                           beacon_name, result.rssi);
-        if (len > 0 && len < (int)sizeof(msg.data_buffer)) {
-            msg.data_len = len;
-            k_msgq_put(&bt_data_msgq, &msg, K_NO_WAIT);
-        }
+        k_sleep(K_MSEC(100));
     }
 
     printk("Sniffer thread stopped\n");
