@@ -14,16 +14,6 @@
 #include "kalman.h"
 #include "least_squares.h"
 
-<<<<<<< Updated upstream
-static const struct json_obj_descr sniffer_data_descr[] =
-    {
-        JSON_OBJ_DESCR_PRIM(struct data_send, raw_pos_x, JSON_TOK_NUMBER),
-
-}
-=======
-
->>>>>>> Stashed changes
-
 static const struct json_obj_descr data_send_descr[] = {
     JSON_OBJ_DESCR_ARRAY(struct data_send, data_buffer, NUS_MAX_DATA_LEN, data_len, JSON_TOK_INT),
     JSON_OBJ_DESCR_PRIM(struct data_send, raw_pos_x, JSON_TOK_NUMBER),
@@ -89,36 +79,6 @@ void parse_thread(void *a, void *b, void *c)
         int beacons_used =
             localise(coords, data.data_buffer, MEASURED_POWER, PATH_LOSS_EXP, raw_pos);
 
-<<<<<<< Updated upstream
-            if (beacons_used == -1 || (isnan(raw_pos[0]) || isnan(raw_pos[1]))) {
-                printk("Localisation failed\n");
-                continue;
-            } else {
-                printk("Localisation successful. Estimated position using %d nodes\n",
-                       beacons_used);
-
-                if (filter_initialised) {
-                    kalman_predict(dt);
-                    kalman_update(raw_pos[0], raw_pos[1]);
-                    kalman_get_position(&filtered_pos[0], &filtered_pos[1]);
-                    kalman_get_velocity(&velocity[0], &velocity[1]);
-                    parse_data_into_json(data, raw_pos, filtered_pos, velocity, curr_time_ms);
-                } else {
-                    if (filter_initialised) {
-                        kalman_predict(dt);
-                        kalman_update(raw_pos[0], raw_pos[1]);
-                        kalman_get_position(&filtered_pos[0], &filtered_pos[1]);
-                        parse_data_into_json(data, raw_pos, filtered_pos);
-                    } else {
-                        init_filter(raw_pos[0], raw_pos[1]);
-                        filter_initialised = true;
-                    }
-                }
-            }
-            else
-            {
-                k_msgq_get(&scan_msgq, &)
-=======
         if (beacons_used == -1 || (isnan(raw_pos[0]) || isnan(raw_pos[1]))) {
             printk("Localisation failed\n");
             continue;
@@ -126,17 +86,15 @@ void parse_thread(void *a, void *b, void *c)
             printk("Localisation successful. Estimated position using %d nodes\n", beacons_used);
 
             if (filter_initialised) {
-                printk("Raw position:    (%.2f, %.2f)\n", (double)raw_pos[0], (double)raw_pos[1]);
                 kalman_predict(dt);
                 kalman_update(raw_pos[0], raw_pos[1]);
                 kalman_get_position(&filtered_pos[0], &filtered_pos[1]);
-                printk("Kalman position: (%.2f, %.2f)\n", (double)filtered_pos[0],
-                       (double)filtered_pos[1]);
-                parse_data_into_json(data, raw_pos, filtered_pos);
+                kalman_get_velocity(&velocity[0], &velocity[1]);
+                parse_data_into_json(data, raw_pos, filtered_pos, velocity, curr_time_ms);
             } else {
                 init_filter(raw_pos[0], raw_pos[1]);
                 filter_initialised = true;
->>>>>>> Stashed changes
             }
         }
     }
+}

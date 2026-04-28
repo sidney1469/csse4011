@@ -3,12 +3,11 @@
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/gap.h>
 #include <string.h>
-#include "shell.h"   /* for beacon_list, ibeacon_node */
+#include "shell.h" /* for beacon_list, ibeacon_node */
 #include "central.h"
 #include "parse.h"
 
 #define NODE_TIMEOUT_MS 3000
-
 
 static const bt_addr_le_t nodelist[] = {
     {.type = BT_ADDR_LE_RANDOM, .a = {{0x67, 0x34, 0x85, 0xFE, 0x75, 0xF5}}},
@@ -28,11 +27,10 @@ static const bt_addr_le_t nodelist[] = {
 
 struct scan_result {
     bt_addr_le_t addr;
-    int8_t       rssi;
+    int8_t rssi;
 };
 
 K_MSGQ_DEFINE(scan_msgq, sizeof(struct scan_result), 30, 4);
-
 
 static bool addr_match(const bt_addr_le_t *addr)
 {
@@ -43,17 +41,6 @@ static bool addr_match(const bt_addr_le_t *addr)
     }
     return false;
 }
-
-static int addr_index(const bt_addr_le_t *addr)
-{
-    for (int i = 0; i < ARRAY_SIZE(nodelist); i++) {
-        if (bt_addr_le_cmp(addr, &nodelist[i]) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
-
 
 static const char *adv_type_str(uint8_t type)
 {
@@ -156,8 +143,8 @@ static bool print_ad_field(struct bt_data *data, void *user_data)
 {
     ARG_UNUSED(user_data);
 
-    printk("  AD type: 0x%02x (%s), len: %u, data: ",
-           data->type, ad_type_str(data->type), data->data_len);
+    printk("  AD type: 0x%02x (%s), len: %u, data: ", data->type, ad_type_str(data->type),
+           data->data_len);
     print_hex_bytes(data->data, data->data_len);
     printk("\n");
 
@@ -204,8 +191,7 @@ static bool print_ad_field(struct bt_data *data, void *user_data)
     return true;
 }
 
-void print_node(const struct bt_le_scan_recv_info *info,
-                struct net_buf_simple *buf)
+void print_node(const struct bt_le_scan_recv_info *info, struct net_buf_simple *buf)
 {
     char addr[BT_ADDR_LE_STR_LEN];
 
@@ -232,8 +218,7 @@ void print_node(const struct bt_le_scan_recv_info *info,
         printk("sid:           %u\n", info->sid);
     }
 
-    printk("adv_type:      0x%02x (%s)\n",
-           info->adv_type, adv_type_str(info->adv_type));
+    printk("adv_type:      0x%02x (%s)\n", info->adv_type, adv_type_str(info->adv_type));
 
     printk("adv_props:     0x%04x", info->adv_props);
 
@@ -255,17 +240,14 @@ void print_node(const struct bt_le_scan_recv_info *info,
 
     printk("\n");
 
-    printk("primary_phy:   0x%02x (%s)\n",
-           info->primary_phy, phy_str(info->primary_phy));
+    printk("primary_phy:   0x%02x (%s)\n", info->primary_phy, phy_str(info->primary_phy));
 
-    printk("secondary_phy: 0x%02x (%s)\n",
-           info->secondary_phy, phy_str(info->secondary_phy));
+    printk("secondary_phy: 0x%02x (%s)\n", info->secondary_phy, phy_str(info->secondary_phy));
 
     if (info->interval == 0) {
         printk("periodic int:  none\n");
     } else {
-        printk("periodic int:  %u units = %u us\n",
-               info->interval, info->interval * 1250U);
+        printk("periodic int:  %u units = %u us\n", info->interval, info->interval * 1250U);
     }
 
     printk("payload len:   %u\n", buf->len);
@@ -288,8 +270,7 @@ void print_node(const struct bt_le_scan_recv_info *info,
 void scan_recv(const struct bt_le_scan_recv_info *info, struct net_buf_simple *buf)
 {
 
-        print_node(info, buf);
-
+    print_node(info, buf);
 
     if (!addr_match(info->addr)) {
         return;
@@ -308,7 +289,6 @@ struct bt_le_scan_cb scan_callbacks = {
 
 void sniffer_thread(void *a, void *b, void *c)
 {
-    struct scan_result result;
 
     printk("Sniffer thread started\n");
 

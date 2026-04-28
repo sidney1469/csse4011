@@ -24,7 +24,6 @@ K_MSGQ_DEFINE(bt_data_msgq, sizeof(struct bt_data_received), 10, 4);
 
 K_THREAD_STACK_DEFINE(sniffer_stack_area, SNIFFER_STACK_SIZE);
 
-
 /* Target peripheral MAC address (LSB first) */
 static const bt_addr_t target_mac_1 = {.val = {0x65, 0xA9, 0xB3, 0x5F, 0x9A, 0xC5}};
 
