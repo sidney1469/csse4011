@@ -3,7 +3,7 @@
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/gap.h>
 #include <string.h>
-#include "shell.h"   /* for beacon_list, ibeacon_node */
+#include "shell.h" /* for beacon_list, ibeacon_node */
 #include "central.h"
 #include "parse.h"
 
@@ -27,11 +27,10 @@ static const bt_addr_le_t nodelist[] = {
 
 struct scan_result {
     bt_addr_le_t addr;
-    int8_t       rssi;
+    int8_t rssi;
 };
 
 K_MSGQ_DEFINE(scan_msgq, sizeof(struct scan_result), 30, 4);
-
 
 static bool addr_match(const bt_addr_le_t *addr)
 {
@@ -101,8 +100,7 @@ void sniffer_thread(void *a, void *b, void *c)
         /* encode and push to bt_data_msgq */
         struct bt_data_received msg = {0};
         int len = snprintf((char *)msg.data_buffer, sizeof(msg.data_buffer),
-                           "{\"beacon\":\"%s\",\"rssi\":%d}",
-                           beacon_name, result.rssi);
+                           "{\"beacon\":\"%s\",\"rssi\":%d}", beacon_name, result.rssi);
         if (len > 0 && len < (int)sizeof(msg.data_buffer)) {
             msg.data_len = len;
             k_msgq_put(&bt_data_msgq, &msg, K_NO_WAIT);
