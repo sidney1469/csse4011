@@ -162,3 +162,9 @@ void kalman_get_position(float *x, float *y)
     *x = X[0];
     *y = X[1];
 }
+
+void kalman_get_velocity(float *x, float *y)
+{
+    *x = X[2];
+    *y = X[3];
+}

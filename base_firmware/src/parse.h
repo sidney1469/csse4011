@@ -17,6 +17,9 @@ struct data_send {
     int32_t raw_pos_y;
     int32_t filtered_pos_x;
     int32_t filtered_pos_y;
+    int32_t velocity_x;
+    int32_t velocity_y;
+    int64_t timestamp;
 };
 
 #endif /* CENTRAL_H */
