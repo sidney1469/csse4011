@@ -8,6 +8,7 @@ target_sources(app PRIVATE
   src/central.c
   src/parse.c
   src/shell.c
+  src/sniffer.c
   lib/least_squares.c
   lib/kalman.c
   lib/matrix.c

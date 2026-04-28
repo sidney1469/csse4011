@@ -14,5 +14,6 @@ struct bt_data_received {
 extern struct k_msgq bt_data_msgq;
 
 void central_thread(void *a, void *b, void *c);
+void sniffer_cb_register(void);
 
 #endif /* CENTRAL_H */

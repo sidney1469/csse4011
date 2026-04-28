@@ -11,6 +11,8 @@
 #include <zephyr/bluetooth/services/nus.h>
 #include <zephyr/sys/byteorder.h>
 #include "central.h"
+#include "shell.h"
+#include "sniffer.h"
 
 static void start_scan(void);
 
@@ -139,6 +141,7 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
         return;
     }
 
+    
     if ((bt_addr_cmp(&addr->a, &target_mac_1) != 0) &&
         (bt_addr_cmp(&addr->a, &target_mac_2) != 0)) {
         return;
@@ -214,6 +217,22 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 };
 
 /* ── Thread entry ────────────────────────────────────────────────────────── */
+k_tid_t tid;
+int enabled = 0;
+
+
+void sniffer_cb_register(void)
+{
+    bt_le_scan_cb_register(&scan_callbacks);
+}
+
+struct bt_le_scan_param scan_param = {
+        .type = BT_LE_SCAN_TYPE_PASSIVE,
+        .options = BT_LE_SCAN_OPT_FILTER_DUPLICATE,
+        .interval = 0x0100,
+        .window = BT_GAP_SCAN_FAST_WINDOW,
+    };
+
 
 void central_thread(void *a, void *b, void *c)
 {
@@ -222,12 +241,60 @@ void central_thread(void *a, void *b, void *c)
         printk("Bluetooth init failed: %d\n", err);
         return;
     }
-
     printk("Bluetooth initialized\n");
     start_scan();
 
     while (1) {
-        // printk("running\n");
+        if (sniffer) {
+            if (!enabled) {
+                bt_le_scan_stop();
+                bt_disable();
+
+                err = bt_enable(NULL);
+                if (err) {
+                    printk("BT re-enable failed: %d\n", err);
+                    k_sleep(K_MSEC(1000));
+                    continue;
+                }
+
+                bt_le_scan_cb_register(&scan_callbacks);
+
+                /* start scan with no legacy callback for sniffer mode */
+                struct bt_le_scan_param scan_param = {
+                    .type    = BT_LE_SCAN_TYPE_PASSIVE,
+                    .options = BT_LE_SCAN_OPT_NONE,
+                    .interval = 0x0100,
+                    .window   = BT_GAP_SCAN_FAST_WINDOW,
+                };
+                bt_le_scan_start(&scan_param, NULL);
+
+                tid = k_thread_create(&sniffer_thread_data, sniffer_stack_area,
+                                      K_THREAD_STACK_SIZEOF(sniffer_stack_area),
+                                      sniffer_thread, NULL, NULL, NULL,
+                                      SNIFFER_PRIORITY, 0, K_NO_WAIT);
+                enabled = 1;
+                printk("Sniffer mode enabled\n");
+            }
+        } else {
+            if (enabled) {
+                k_thread_abort(tid);
+                enabled = 0;
+                tid = 0;
+
+                bt_le_scan_stop();
+                bt_disable();
+
+                err = bt_enable(NULL);
+                if (err) {
+                    printk("BT re-enable failed: %d\n", err);
+                    k_sleep(K_MSEC(1000));
+                    continue;
+                }
+
+                start_scan();  /* back to central mode with device_found */
+                printk("Central mode enabled\n");
+            }
+        }
         k_sleep(K_MSEC(1000));
     }
 }
