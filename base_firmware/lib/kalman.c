@@ -2,10 +2,10 @@
 #include <math.h>
 #include "kalman.h"
 
-#define Q 0.01f
-#define R 4.0f
+#define Q 0.01f // Process noise variance (Uncertainty in model)
+#define R 4.0f  // Measurement noise variance (m^2) (Uncertainty in measurement)
 
-static float X[4];
+static float X[4]; // X = [x, y, vx, vy]
 static float P[4][4];
 
 void init_filter(float x0, float y0)
@@ -31,12 +31,15 @@ void kalman_predict(float dt)
     };
 
     // State transition: F @ x
+    // Projects the current state forward in time by dt
     float X_temp[4];
     multiply_matrix((float *)F, X, X_temp, 4, 4, 1);
     for (int i = 0; i < 4; i++) {
         X[i] = X_temp[i];
     }
     // P = F * P * F_T + Q
+    // Covariance matrix: uncertainty in estimate - should grow here and shrink
+    // during update process
     float F_T[4][4];
     float FP[4][4];
     float FPF_T[4][4];
@@ -80,6 +83,7 @@ void kalman_update(float x_meas, float y_meas)
     };
 
     // y = z - H*x
+    // Difference between what was measured and what the filter predicted
     float HX[2];
     multiply_matrix((float *)H, X, HX, 2, 4, 1);
     float y[2] = {
@@ -87,7 +91,9 @@ void kalman_update(float x_meas, float y_meas)
         y_meas - HX[1],
     };
 
-    // S = H*P*Hᵀ + R*I
+    // S = H*P*H_T + R*I
+    // Total uncertainty in measurement
+    // Combines uncertainty from the state estimate and the measurement noise R
     float H_T[4][2];
     float HP[2][4];
     float HPH_T[2][2];
@@ -106,7 +112,9 @@ void kalman_update(float x_meas, float y_meas)
         return; // singular, skip update
     }
 
-    // K = P*Hᵀ*S_inv  (6x3 Kalman gain)
+    // K = P*H_T*S_inv  (4x2 Kalman gain)
+    // Determines how much the model is trusted. High K = trust measurement
+    // more, Low K = trust prediction more.
     float PH_T[4][2];
     float K[4][2];
 
