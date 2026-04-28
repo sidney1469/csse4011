@@ -20,7 +20,6 @@ static struct bt_conn *default_conn;
 
 char data_msgq_buffer[10 * sizeof(struct bt_data_received)];
 
-// At file scope, replaces the manual init entirely
 K_MSGQ_DEFINE(bt_data_msgq, sizeof(struct bt_data_received), 10, 4);
 
 /* Target peripheral MAC address (LSB first) */
@@ -36,8 +35,6 @@ static struct bt_uuid_128 nus_rx_uuid = BT_UUID_INIT_128(BT_UUID_NUS_RX_CHAR_VAL
 /* GATT subscribe params — must persist for lifetime of subscription */
 static struct bt_gatt_subscribe_params subscribe_params;
 static struct bt_gatt_discover_params discover_params;
-
-/* ── NUS receive callback ────────────────────────────────────────────────── */
 
 static uint8_t on_received(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
                            const void *data, uint16_t length)
@@ -60,15 +57,8 @@ static uint8_t on_received(struct bt_conn *conn, struct bt_gatt_subscribe_params
 
     k_msgq_put(&bt_data_msgq, &new_data, K_NO_WAIT);
 
-    /*printk("Received %d bytes: \n", length);
-    for (int i = 0; i < length; i++) {
-        printk("%d ", bytes[i]);
-    }
-    printk("\n");*/
     return BT_GATT_ITER_CONTINUE;
 }
-
-/* ── GATT discovery ──────────────────────────────────────────────────────── */
 
 static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                              struct bt_gatt_discover_params *params)
@@ -78,7 +68,6 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
         return BT_GATT_ITER_STOP;
     }
 
-    /* If we found the Primary Service */
     if (!bt_uuid_cmp(params->uuid, &nus_svc_uuid.uuid)) {
         params->uuid = NULL; // Discover all characteristics
         params->start_handle = attr->handle + 1;
@@ -87,10 +76,8 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
         return BT_GATT_ITER_STOP;
     }
 
-    /* 2. DEFINE 'chrc' HERE by casting user_data */
     struct bt_gatt_chrc *chrc = (struct bt_gatt_chrc *)attr->user_data;
 
-    /* Check if it is the TX Characteristic (Phone -> XIAO) */
     if (!bt_uuid_cmp(chrc->uuid, &nus_tx_uuid.uuid)) {
         printk("Found NUS TX Characteristic\n");
         subscribe_params.notify = on_received;
@@ -105,7 +92,7 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
             printk("Subscribed to NUS TX\n");
         }
     }
-    /* 3. NOW chrc is available for this comparison */
+
     else if (!bt_uuid_cmp(chrc->uuid, &nus_rx_uuid.uuid)) {
         printk("Found NUS RX Characteristic (Phone can write to this)\n");
     }
@@ -141,7 +128,6 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
         return;
     }
 
-    
     if ((bt_addr_cmp(&addr->a, &target_mac_1) != 0) &&
         (bt_addr_cmp(&addr->a, &target_mac_2) != 0)) {
         return;
@@ -220,19 +206,17 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 k_tid_t tid;
 int enabled = 0;
 
-
 void sniffer_cb_register(void)
 {
     bt_le_scan_cb_register(&scan_callbacks);
 }
 
 struct bt_le_scan_param scan_param = {
-        .type = BT_LE_SCAN_TYPE_PASSIVE,
-        .options = BT_LE_SCAN_OPT_FILTER_DUPLICATE,
-        .interval = 0x0100,
-        .window = BT_GAP_SCAN_FAST_WINDOW,
-    };
-
+    .type = BT_LE_SCAN_TYPE_PASSIVE,
+    .options = BT_LE_SCAN_OPT_FILTER_DUPLICATE,
+    .interval = 0x0100,
+    .window = BT_GAP_SCAN_FAST_WINDOW,
+};
 
 void central_thread(void *a, void *b, void *c)
 {
@@ -261,17 +245,16 @@ void central_thread(void *a, void *b, void *c)
 
                 /* start scan with no legacy callback for sniffer mode */
                 struct bt_le_scan_param scan_param = {
-                    .type    = BT_LE_SCAN_TYPE_PASSIVE,
+                    .type = BT_LE_SCAN_TYPE_PASSIVE,
                     .options = BT_LE_SCAN_OPT_NONE,
                     .interval = 0x0100,
-                    .window   = BT_GAP_SCAN_FAST_WINDOW,
+                    .window = BT_GAP_SCAN_FAST_WINDOW,
                 };
                 bt_le_scan_start(&scan_param, NULL);
 
                 tid = k_thread_create(&sniffer_thread_data, sniffer_stack_area,
-                                      K_THREAD_STACK_SIZEOF(sniffer_stack_area),
-                                      sniffer_thread, NULL, NULL, NULL,
-                                      SNIFFER_PRIORITY, 0, K_NO_WAIT);
+                                      K_THREAD_STACK_SIZEOF(sniffer_stack_area), sniffer_thread,
+                                      NULL, NULL, NULL, SNIFFER_PRIORITY, 0, K_NO_WAIT);
                 enabled = 1;
                 printk("Sniffer mode enabled\n");
             }
@@ -291,7 +274,7 @@ void central_thread(void *a, void *b, void *c)
                     continue;
                 }
 
-                start_scan();  /* back to central mode with device_found */
+                start_scan(); /* back to central mode with device_found */
                 printk("Central mode enabled\n");
             }
         }

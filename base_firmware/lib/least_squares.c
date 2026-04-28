@@ -125,7 +125,7 @@ int localise(float beacon_coords[N_BEACONS][N_AXIS], int8_t rssi[N_BEACONS], flo
         valid_count++;
     }
 
-    if (valid_count < 4) {
+    if (valid_count < 3) {
         printk("Not enough valid beacons for localisation: %d\n", valid_count);
         return -1;
     }
