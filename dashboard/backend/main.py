@@ -23,6 +23,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False,
 clients: set[WebSocket] = set()
 ser: serial.Serial = None
 beacon_registry: dict[str, dict] = {}
+SNIFFER_MODE = False
 
 
 class Node(BaseModel):
@@ -75,7 +76,6 @@ class BeaconViewParser:
             v = v.strip('(').strip(')')
             m = tuple(map(float, v.split(",")))
             print(v)
-
             if m:
                 self._current["x"] = float(m[0])
                 self._current["y"] = float(m[1])
@@ -137,6 +137,25 @@ async def set_config(body: dict):
     if "path_loss_exp" in body: PATH_LOSS_EXP = float(body["path_loss_exp"])
     return {"status": "ok", "meas_power": MEAS_POWER, "path_loss_exp": PATH_LOSS_EXP}
 
+@app.post("/sniffer/{state}")
+async def set_sniffer(state: str):
+    global SNIFFER_MODE
+    if ser is None:
+        raise HTTPException(status_code=503, detail="Serial port not open")
+    if state == "on":
+        ser.write(b"beacon sniffer\n")
+        SNIFFER_MODE = True
+    elif state == "off":
+        ser.write(b"beacon sniffer\n")
+        SNIFFER_MODE = False
+    else:
+        raise HTTPException(status_code=400, detail="state must be 'on' or 'off'")
+    return {"status": "ok", "sniffer": SNIFFER_MODE}
+
+@app.get("/sniffer")
+async def get_sniffer():
+    return {"sniffer": SNIFFER_MODE}
+
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────
 
@@ -165,18 +184,8 @@ async def websocket_endpoint(websocket: WebSocket):
 # ── Packet parser ─────────────────────────────────────────────────────────────
 
 def parse_packet(line: str) -> dict | None:
-    """
-    Firmware JSON format (all integer centimetres):
-      {"data_buffer":[rssi0..rssi12],"data_len":N,
-       "raw_pos_x":INT,"raw_pos_y":INT,
-       "filtered_pos_x":INT,"filtered_pos_y":INT}
-    """
-
-
     print(f"line: {line}")
-
     try:
-        # Fix doubled braces that Zephyr JSON encoder sometimes emits
         line = line.replace("{{{", "{").replace("}}}", "}")
         line = line.replace("{{",  "{").replace("}}",  "}")
         if not (line.startswith("{") and line.endswith("}")):
@@ -186,33 +195,48 @@ def parse_packet(line: str) -> dict | None:
 
         raw = json.loads(line)
 
+        # ── Sniffer node packet ──────────────────────────────────────────
+        if "addr_str" in raw:
+            return {
+                "type":                   "sniffer_node",
+                "addr":                   raw.get("addr_str", ""),
+                "rssi":                   raw.get("rssi", 0),
+                "tx_power":               raw.get("tx_power", 0),
+                "adv_type":               raw.get("adv_type", 0),
+                "adv_props":              raw.get("adv_props", 0),
+                "has_name":               raw.get("has_name", False),
+                "name":                   raw.get("name", ""),
+                "has_flags":              raw.get("has_flags", False),
+                "flags":                  raw.get("flags", 0),
+                "has_manufacturer_data":  raw.get("has_manufacturer_data", False),
+                "manufacturer_company_id": raw.get("manufacturer_company_id", 0),
+                "manufacturer_data":      raw.get("manufacturer_data", []),
+                "has_service_data":       raw.get("has_service_data", False),
+                "service_data_type":      raw.get("service_data_type", 0),
+                "service_data":           raw.get("service_data", []),
+                "interval":               raw.get("interval", 0),
+                "primary_phy":            raw.get("primary_phy", 0),
+                "secondary_phy":          raw.get("secondary_phy", 0),
+                "raw":                    raw.get("raw", []),
+            }
+        
+        if "addr" in raw:
+            filtered = raw.strip("addr:")
+            print(f"filtered: {filtered}")
+
+        # ── Normal localisation packet ───────────────────────────────────
         data = raw.get("data_buffer", [])
         if len(data) != NUM_NODES:
             print(f"Unexpected data_len={len(data)}, expected {NUM_NODES} — skipping")
             return None
 
-        # Map each RSSI value to its node by position (index == firmware beacon slot)
         nodes = [
             {"name": NODE_NAMES[i], "rssi": rssi, "distance": rssi_to_distance(rssi)}
             for i, rssi in enumerate(data)
         ]
-
-        # Positions encoded as int centimetres → convert to float metres
-        raw_pos = {
-            "x": raw.get("raw_pos_x",      0) / 100.0,
-            "y": raw.get("raw_pos_y",      0) / 100.0,
-        }
-        filtered_pos = {
-            "x": raw.get("filtered_pos_x", 0) / 100.0,
-            "y": raw.get("filtered_pos_y", 0) / 100.0,
-        }
-
-        return {
-            "type":         "rssi",
-            "nodes":        nodes,
-            "raw_position": raw_pos,
-            "position":     filtered_pos,   # "position" = Kalman filtered
-        }
+        raw_pos      = {"x": raw.get("raw_pos_x",      0) / 100.0, "y": raw.get("raw_pos_y",      0) / 100.0}
+        filtered_pos = {"x": raw.get("filtered_pos_x", 0) / 100.0, "y": raw.get("filtered_pos_y", 0) / 100.0}
+        return {"type": "rssi", "nodes": nodes, "raw_position": raw_pos, "position": filtered_pos}
 
     except (json.JSONDecodeError, KeyError, TypeError) as e:
         print(f"Parse error: {e} | {line!r}")

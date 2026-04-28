@@ -9,10 +9,6 @@
 
 #define NODE_TIMEOUT_MS 3000
 
-har data_msgq_buffer[10 * sizeof(struct bt_data_received)];
-
-// At file scope, replaces the manual init entirely
-K_MSGQ_DEFINE(scan_msgq, sizeof(struct ble_scan_node), 16, 4);
 
 static const bt_addr_le_t nodelist[] = {
     {.type = BT_ADDR_LE_RANDOM, .a = {{0x67, 0x34, 0x85, 0xFE, 0x75, 0xF5}}},
@@ -58,106 +54,147 @@ static int addr_index(const bt_addr_le_t *addr)
     return -1;
 }
 
-static size_t copy_clamped(uint8_t *dst, size_t dst_max,
-                           const uint8_t *src, size_t src_len)
+
+static const char *adv_type_str(uint8_t type)
 {
-    size_t n = src_len;
-
-    if (n > dst_max) {
-        n = dst_max;
+    switch (type) {
+    case BT_GAP_ADV_TYPE_ADV_IND:
+        return "ADV_IND: connectable + scannable";
+    case BT_GAP_ADV_TYPE_ADV_DIRECT_IND:
+        return "ADV_DIRECT_IND: directed connectable";
+    case BT_GAP_ADV_TYPE_ADV_SCAN_IND:
+        return "ADV_SCAN_IND: scannable";
+    case BT_GAP_ADV_TYPE_ADV_NONCONN_IND:
+        return "ADV_NONCONN_IND: non-connectable";
+    case BT_GAP_ADV_TYPE_SCAN_RSP:
+        return "SCAN_RSP";
+    case BT_GAP_ADV_TYPE_EXT_ADV:
+        return "EXT_ADV";
+    default:
+        return "UNKNOWN";
     }
-
-    if (n > 0) {
-        memcpy(dst, src, n);
-    }
-
-    return n;
 }
 
-static bool parse_ad_field(struct bt_data *data, void *user_data)
+static const char *phy_str(uint8_t phy)
 {
-    struct ble_scan_node *node = user_data;
-
-    /* Store generic AD field */
-    if (node->ad_field_count < BLE_NODE_MAX_AD_FIELDS) {
-        struct ble_ad_field *field = &node->ad_fields[node->ad_field_count++];
-
-        field->type = data->type;
-        field->len = copy_clamped(field->data,
-                                  sizeof(field->data),
-                                  data->data,
-                                  data->data_len);
+    switch (phy) {
+    case BT_GAP_LE_PHY_NONE:
+        return "none";
+    case BT_GAP_LE_PHY_1M:
+        return "LE 1M";
+    case BT_GAP_LE_PHY_2M:
+        return "LE 2M";
+    case BT_GAP_LE_PHY_CODED:
+        return "LE coded";
+#ifdef BT_GAP_LE_PHY_CODED_S8
+    case BT_GAP_LE_PHY_CODED_S8:
+        return "LE coded S=8";
+#endif
+#ifdef BT_GAP_LE_PHY_CODED_S2
+    case BT_GAP_LE_PHY_CODED_S2:
+        return "LE coded S=2";
+#endif
+    default:
+        return "unknown";
     }
+}
 
-    /* Store common parsed fields */
+static const char *ad_type_str(uint8_t type)
+{
+    switch (type) {
+    case BT_DATA_FLAGS:
+        return "FLAGS";
+    case BT_DATA_UUID16_SOME:
+        return "UUID16_SOME";
+    case BT_DATA_UUID16_ALL:
+        return "UUID16_ALL";
+    case BT_DATA_UUID32_SOME:
+        return "UUID32_SOME";
+    case BT_DATA_UUID32_ALL:
+        return "UUID32_ALL";
+    case BT_DATA_UUID128_SOME:
+        return "UUID128_SOME";
+    case BT_DATA_UUID128_ALL:
+        return "UUID128_ALL";
+    case BT_DATA_NAME_SHORTENED:
+        return "NAME_SHORTENED";
+    case BT_DATA_NAME_COMPLETE:
+        return "NAME_COMPLETE";
+    case BT_DATA_TX_POWER:
+        return "TX_POWER";
+    case BT_DATA_SOLICIT16:
+        return "SOLICIT16";
+    case BT_DATA_SOLICIT128:
+        return "SOLICIT128";
+    case BT_DATA_SVC_DATA16:
+        return "SVC_DATA16";
+    case BT_DATA_GAP_APPEARANCE:
+        return "GAP_APPEARANCE";
+    case BT_DATA_MANUFACTURER_DATA:
+        return "MANUFACTURER_DATA";
+    case BT_DATA_SVC_DATA32:
+        return "SVC_DATA32";
+    case BT_DATA_SVC_DATA128:
+        return "SVC_DATA128";
+    default:
+        return "UNKNOWN_AD_TYPE";
+    }
+}
+
+static void print_hex_bytes(const uint8_t *data, uint8_t len)
+{
+    for (uint8_t i = 0; i < len; i++) {
+        printk("%02x", data[i]);
+
+        if (i + 1 < len) {
+            printk(" ");
+        }
+    }
+}
+
+static bool print_ad_field(struct bt_data *data, void *user_data)
+{
+    ARG_UNUSED(user_data);
+
+    printk("  AD type: 0x%02x (%s), len: %u, data: ",
+           data->type, ad_type_str(data->type), data->data_len);
+    print_hex_bytes(data->data, data->data_len);
+    printk("\n");
+
     switch (data->type) {
     case BT_DATA_NAME_COMPLETE:
-    case BT_DATA_NAME_SHORTENED: {
-        size_t n = data->data_len;
-
-        if (n >= BLE_NODE_NAME_MAX_LEN) {
-            n = BLE_NODE_NAME_MAX_LEN - 1;
+    case BT_DATA_NAME_SHORTENED:
+        printk("    name: \"");
+        for (uint8_t i = 0; i < data->data_len; i++) {
+            printk("%c", data->data[i]);
         }
-
-        memcpy(node->name, data->data, n);
-        node->name[n] = '\0';
-        node->has_name = true;
+        printk("\"\n");
         break;
-    }
 
     case BT_DATA_FLAGS:
         if (data->data_len >= 1) {
-            node->flags = data->data[0];
-            node->has_flags = true;
+            printk("    flags: 0x%02x\n", data->data[0]);
         }
         break;
 
     case BT_DATA_TX_POWER:
         if (data->data_len >= 1) {
-            node->adv_tx_power = (int8_t)data->data[0];
-            node->has_adv_tx_power = true;
+            printk("    adv tx power: %d dBm\n", (int8_t)data->data[0]);
+        }
+        break;
+
+    case BT_DATA_MANUFACTURER_DATA:
+        if (data->data_len >= 2) {
+            uint16_t company_id = data->data[0] | (data->data[1] << 8);
+            printk("    company id: 0x%04x\n", company_id);
         }
         break;
 
     case BT_DATA_GAP_APPEARANCE:
         if (data->data_len >= 2) {
-            node->appearance = data->data[0] | (data->data[1] << 8);
-            node->has_appearance = true;
+            uint16_t appearance = data->data[0] | (data->data[1] << 8);
+            printk("    appearance: 0x%04x\n", appearance);
         }
-        break;
-
-    case BT_DATA_MANUFACTURER_DATA:
-        node->has_manufacturer_data = true;
-
-        if (data->data_len >= 2) {
-            node->manufacturer_company_id =
-                data->data[0] | (data->data[1] << 8);
-
-            node->manufacturer_data_len =
-                copy_clamped(node->manufacturer_data,
-                             sizeof(node->manufacturer_data),
-                             data->data + 2,
-                             data->data_len - 2);
-        } else {
-            node->manufacturer_company_id = 0;
-            node->manufacturer_data_len =
-                copy_clamped(node->manufacturer_data,
-                             sizeof(node->manufacturer_data),
-                             data->data,
-                             data->data_len);
-        }
-        break;
-
-    case BT_DATA_SVC_DATA16:
-    case BT_DATA_SVC_DATA32:
-    case BT_DATA_SVC_DATA128:
-        node->has_service_data = true;
-        node->service_data_type = data->type;
-        node->service_data_len =
-            copy_clamped(node->service_data,
-                         sizeof(node->service_data),
-                         data->data,
-                         data->data_len);
         break;
 
     default:
@@ -167,45 +204,102 @@ static bool parse_ad_field(struct bt_data *data, void *user_data)
     return true;
 }
 
-static void fill_ble_scan_node(struct ble_scan_node *node,
-                               const struct bt_le_scan_recv_info *info,
-                               struct net_buf_simple *buf)
+void print_node(const struct bt_le_scan_recv_info *info,
+                struct net_buf_simple *buf)
 {
-    memset(node, 0, sizeof(*node));
+    char addr[BT_ADDR_LE_STR_LEN];
 
-    bt_addr_le_copy(&node->addr, info->addr);
+    if (!info || !buf) {
+        printk("print_node: null info/buf\n");
+        return;
+    }
 
-    node->rssi = info->rssi;
-    node->tx_power = info->tx_power;
+    bt_addr_le_to_str(info->addr, addr, sizeof(addr));
 
-    node->sid = info->sid;
-    node->adv_type = info->adv_type;
-    node->adv_props = info->adv_props;
-    node->interval = info->interval;
-    node->primary_phy = info->primary_phy;
-    node->secondary_phy = info->secondary_phy;
+    printk("\n========== BLE SCAN NODE ==========\n");
+    printk("addr:          %s\n", addr);
+    printk("rssi:          %d dBm\n", info->rssi);
 
-    node->raw_len = copy_clamped(node->raw,
-                                 sizeof(node->raw),
-                                 buf->data,
-                                 buf->len);
+    if (info->tx_power == BT_GAP_TX_POWER_INVALID) {
+        printk("tx_power:      invalid/unknown\n");
+    } else {
+        printk("tx_power:      %d dBm\n", info->tx_power);
+    }
 
+    if (info->sid == BT_GAP_SID_INVALID) {
+        printk("sid:           invalid/not present\n");
+    } else {
+        printk("sid:           %u\n", info->sid);
+    }
+
+    printk("adv_type:      0x%02x (%s)\n",
+           info->adv_type, adv_type_str(info->adv_type));
+
+    printk("adv_props:     0x%04x", info->adv_props);
+
+    if (info->adv_props & BT_GAP_ADV_PROP_CONNECTABLE) {
+        printk(" CONNECTABLE");
+    }
+    if (info->adv_props & BT_GAP_ADV_PROP_SCANNABLE) {
+        printk(" SCANNABLE");
+    }
+    if (info->adv_props & BT_GAP_ADV_PROP_DIRECTED) {
+        printk(" DIRECTED");
+    }
+    if (info->adv_props & BT_GAP_ADV_PROP_SCAN_RESPONSE) {
+        printk(" SCAN_RESPONSE");
+    }
+    if (info->adv_props & BT_GAP_ADV_PROP_EXT_ADV) {
+        printk(" EXT_ADV");
+    }
+
+    printk("\n");
+
+    printk("primary_phy:   0x%02x (%s)\n",
+           info->primary_phy, phy_str(info->primary_phy));
+
+    printk("secondary_phy: 0x%02x (%s)\n",
+           info->secondary_phy, phy_str(info->secondary_phy));
+
+    if (info->interval == 0) {
+        printk("periodic int:  none\n");
+    } else {
+        printk("periodic int:  %u units = %u us\n",
+               info->interval, info->interval * 1250U);
+    }
+
+    printk("payload len:   %u\n", buf->len);
+    printk("payload raw:   ");
+    print_hex_bytes(buf->data, buf->len);
+    printk("\n");
+
+    printk("parsed AD fields:\n");
+
+    /*
+     * bt_data_parse() consumes/pulls from the buffer, so parse a shallow copy
+     * and leave the original scan buffer untouched.
+     */
     struct net_buf_simple ad = *buf;
-    bt_data_parse(&ad, parse_ad_field, node);
+    bt_data_parse(&ad, print_ad_field, NULL);
+
+    printk("===================================\n\n");
 }
 
-void scan_recv(const struct bt_le_scan_recv_info *info,
-               struct net_buf_simple *buf)
+void scan_recv(const struct bt_le_scan_recv_info *info, struct net_buf_simple *buf)
 {
+
+        print_node(info, buf);
+
+
     if (!addr_match(info->addr)) {
         return;
     }
 
-    struct ble_scan_node node;
+    struct scan_result result;
+    bt_addr_le_copy(&result.addr, info->addr);
+    result.rssi = info->rssi;
 
-    fill_ble_scan_node(&node, info, buf);
-
-    k_msgq_put(&scan_msgq, &node, K_NO_WAIT);
+    k_msgq_put(&scan_msgq, &result, K_NO_WAIT);
 }
 
 struct bt_le_scan_cb scan_callbacks = {
@@ -219,7 +313,7 @@ void sniffer_thread(void *a, void *b, void *c)
     printk("Sniffer thread started\n");
 
     while (sniffer) {
-        k_sleep(K_MSEC(100));
+        k_sleep(K_MSEC(1));
     }
 
     printk("Sniffer thread stopped\n");

@@ -1,15 +1,20 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import axios from 'axios'
 
-// Must match NODE_NAMES in main.py AND the order firmware stores beacons
 const NODE_NAMES = ['4011-A','4011-B','4011-C','4011-D','4011-E','4011-F',
                     '4011-G','4011-H','4011-I','4011-J','4011-K','4011-L','4011-M']
 const API    = 'http://localhost:8000'
 const GRID_W = 1200
 const GRID_H = 900
 const CELL   = 60
-const TABS   = ['nodes','position','config','log']
+const TABS   = ['nodes','position','sniffer','config','log']
 const TRAJ_HISTORY = 300
+
+const PHY_STR = { 0:'None', 1:'LE 1M', 2:'LE 2M', 3:'LE Coded' }
+const ADV_TYPE_STR = {
+  0:'ADV_IND', 1:'ADV_DIRECT_IND', 2:'ADV_SCAN_IND',
+  3:'ADV_NONCONN_IND', 4:'SCAN_RSP', 5:'EXT_ADV'
+}
 
 function metersToGrid(x, y) {
   return { gx: GRID_W / 2 + x * CELL, gy: GRID_H / 2 - y * CELL }
@@ -24,25 +29,28 @@ function gridToMeters(gx, gy) {
 const EMPTY_FORM = { name:'', mac:'', major:0, minor:0, x:0, y:0, z:0, left:'', right:'' }
 
 export default function App() {
-  const [nodes,      setNodes]      = useState({})
-  const [liveData,   setLiveData]   = useState({})
-  const [liveRawPos, setLiveRawPos] = useState(null)   // raw (LS)
-  const [liveFiltPos,setLiveFiltPos]= useState(null)   // filtered (Kalman)
-  const [selectedId, setSelectedId] = useState(null)
-  const [addMode,    setAddMode]    = useState(false)
-  const [showRings,  setShowRings]  = useState(true)
-  const [showPos,    setShowPos]    = useState(true)
-  const [form,       setForm]       = useState(EMPTY_FORM)
-  const [wsStatus,   setWsStatus]   = useState('Disconnected')
-  const [pktCount,   setPktCount]   = useState(0)
-  const [toast,      setToast]      = useState({ type:'', msg:'' })
-  const [sending,    setSending]    = useState(false)
-  const [activeTab,  setActiveTab]  = useState('nodes')
-  const [config,     setConfig]     = useState({ meas_power:-56, path_loss_exp:2.5 })
-  const [configSaving,setConfigSaving] = useState(false)
-  const [log,        setLog]        = useState([])
-  const [showRaw,    setShowRaw]    = useState(true)
-  const [showFilt,   setShowFilt]   = useState(true)
+  const [nodes,           setNodes]           = useState({})
+  const [liveData,        setLiveData]        = useState({})
+  const [liveRawPos,      setLiveRawPos]      = useState(null)
+  const [liveFiltPos,     setLiveFiltPos]     = useState(null)
+  const [selectedId,      setSelectedId]      = useState(null)
+  const [addMode,         setAddMode]         = useState(false)
+  const [showRings,       setShowRings]       = useState(true)
+  const [showPos,         setShowPos]         = useState(true)
+  const [form,            setForm]            = useState(EMPTY_FORM)
+  const [wsStatus,        setWsStatus]        = useState('Disconnected')
+  const [pktCount,        setPktCount]        = useState(0)
+  const [toast,           setToast]           = useState({ type:'', msg:'' })
+  const [sending,         setSending]         = useState(false)
+  const [activeTab,       setActiveTab]       = useState('nodes')
+  const [config,          setConfig]          = useState({ meas_power:-56, path_loss_exp:2.5 })
+  const [configSaving,    setConfigSaving]    = useState(false)
+  const [log,             setLog]             = useState([])
+  const [showRaw,         setShowRaw]         = useState(true)
+  const [showFilt,        setShowFilt]        = useState(true)
+  const [snifferMode,     setSnifferMode]     = useState(false)
+  const [snifferNodes,    setSnifferNodes]    = useState({})
+  const [selectedSniffer, setSelectedSniffer] = useState(null)
 
   const rawHistRef  = useRef([])
   const filtHistRef = useRef([])
@@ -62,7 +70,7 @@ export default function App() {
     setLog(l => [...l.slice(-299), { ts, msg, type }])
   }, [])
 
-  // ── Grid canvas ──────────────────────────────────────
+  // ── Grid canvas ───────────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -73,11 +81,11 @@ export default function App() {
     for (let x = 0; x <= GRID_W; x += CELL) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,GRID_H); ctx.stroke() }
     for (let y = 0; y <= GRID_H; y += CELL) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(GRID_W,y); ctx.stroke() }
     ctx.strokeStyle = 'rgba(55,65,80,1)'; ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(GRID_W/2,0);   ctx.lineTo(GRID_W/2,GRID_H); ctx.stroke()
-    ctx.beginPath(); ctx.moveTo(0,GRID_H/2);   ctx.lineTo(GRID_W,GRID_H/2); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(GRID_W/2,0);  ctx.lineTo(GRID_W/2,GRID_H); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(0,GRID_H/2);  ctx.lineTo(GRID_W,GRID_H/2); ctx.stroke()
   }, [])
 
-  // ── Trajectory RAF loop ──────────────────────────────
+  // ── Trajectory RAF loop ───────────────────────────────────────────────────
   useEffect(() => {
     let raf
     const draw = () => {
@@ -95,11 +103,9 @@ export default function App() {
       const pad=1; minX-=pad; maxX+=pad; minY-=pad; maxY+=pad
       const rX=maxX-minX||1, rY=maxY-minY||1
       const tc=(x,y)=>({ cx:((x-minX)/rX)*(W-40)+20, cy:H-(((y-minY)/rY)*(H-40)+20) })
-      // grid lines
       ctx.strokeStyle='rgba(37,43,53,0.6)'; ctx.lineWidth=0.5
       for(let gx=Math.ceil(minX);gx<=Math.floor(maxX);gx++){const{cx}=tc(gx,minY);ctx.beginPath();ctx.moveTo(cx,0);ctx.lineTo(cx,H);ctx.stroke()}
       for(let gy=Math.ceil(minY);gy<=Math.floor(maxY);gy++){const{cy}=tc(minX,gy);ctx.beginPath();ctx.moveTo(0,cy);ctx.lineTo(W,cy);ctx.stroke()}
-      // labels
       ctx.fillStyle='rgba(74,85,104,0.9)'; ctx.font='9px monospace'
       for(let gx=Math.ceil(minX);gx<=Math.floor(maxX);gx++){const{cx}=tc(gx,minY);ctx.fillText(gx+'m',cx+2,H-4)}
       for(let gy=Math.ceil(minY);gy<=Math.floor(maxY);gy++){const{cy}=tc(minX,gy);ctx.fillText(gy+'m',2,cy-3)}
@@ -129,11 +135,12 @@ export default function App() {
 
   useEffect(() => {
     axios.get(`${API}/config`).then(r => setConfig({ meas_power:r.data.meas_power, path_loss_exp:r.data.path_loss_exp })).catch(()=>{})
+    axios.get(`${API}/sniffer`).then(r => setSnifferMode(r.data.sniffer)).catch(()=>{})
   }, [])
 
   useEffect(() => { if(logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight }, [log])
 
-  // ── WebSocket ────────────────────────────────────────
+  // ── WebSocket ─────────────────────────────────────────────────────────────
   useEffect(() => {
     const connect = () => {
       const ws = new WebSocket('ws://localhost:8000/ws')
@@ -145,13 +152,12 @@ export default function App() {
       ws.onmessage = (e) => {
         let pkt; try { pkt = JSON.parse(e.data) } catch { return }
 
-        // ── beacon_list ──────────────────────────────
+        // ── beacon_list ────────────────────────────────────────────────
         if (pkt.type === 'beacon_list') {
           addLog(`Received ${pkt.beacons?.length ?? 0} beacons`, 'ok')
           setNodes(prev => {
             const next = { ...prev }
             ;(pkt.beacons || []).forEach(b => {
-              // Normalise separator: device may send "4011-A" or "4011_A"
               const key = b.name.replace(/-/g, '_')
               next[key] = { ...(prev[key]||{}), name:key, mac:b.mac||'', major:b.major??0, minor:b.minor??0, x:b.x??0, y:b.y??0, z:b.z??0, left:b.left||'', right:b.right||'', placed:true }
             })
@@ -160,13 +166,18 @@ export default function App() {
           return
         }
 
-        // ── rssi packet ──────────────────────────────
-        // Backend already maps data_buffer[i] → NODE_NAMES[i] by index,
-        // so node.name is guaranteed to match our NODE_NAMES array.
+        // ── sniffer_node ───────────────────────────────────────────────
+        if (pkt.type === 'sniffer_node') {
+          setSnifferNodes(prev => ({
+            ...prev,
+            [pkt.addr]: { ...pkt, last_seen: Date.now() }
+          }))
+          return
+        }
+
+        // ── rssi packet ────────────────────────────────────────────────
         if (pkt.type === 'rssi') {
           setPktCount(c => c + 1)
-
-          // RSSI per node — keyed by name (already underscore format from backend)
           setLiveData(prev => {
             const next = { ...prev }
             ;(pkt.nodes || []).forEach(n => {
@@ -175,15 +186,11 @@ export default function App() {
             })
             return next
           })
-
-          // raw_position = least-squares output before Kalman
           if (pkt.raw_position) {
             const rp = pkt.raw_position
             setLiveRawPos(rp)
             rawHistRef.current = [...rawHistRef.current.slice(-(TRAJ_HISTORY-1)), { x:rp.x, y:rp.y }]
           }
-
-          // position = Kalman filtered
           if (pkt.position) {
             const fp = pkt.position
             setLiveFiltPos(fp)
@@ -239,6 +246,18 @@ export default function App() {
     finally { setSending(false) }
   }
 
+  const toggleSniffer = async () => {
+    const next = !snifferMode
+    try {
+      await axios.post(`${API}/sniffer/${next ? 'on' : 'off'}`)
+      setSnifferMode(next)
+      if (!next) { setSnifferNodes({}); setSelectedSniffer(null) }
+      addLog(`Sniffer mode ${next ? 'ON' : 'OFF'}`, 'ok')
+    } catch(err) {
+      addLog(`Sniffer toggle failed: ${err.message}`, 'err')
+    }
+  }
+
   const viewNode     = async (name) => { try{await axios.get(`${API}/view_node/${name}`);addLog(`Queried ${name}`)}catch(err){addLog(err.message,'err')} }
   const viewAllNodes = async ()     => { try{await axios.get(`${API}/view_nodes`);addLog('Queried all nodes')}catch(err){addLog(err.message,'err')} }
   const saveConfig   = async () => {
@@ -251,8 +270,27 @@ export default function App() {
 
   const live        = selectedId ? (liveData[selectedId]||{}) : {}
   const activeCount = Object.values(liveData).filter(n=>n.rssi&&n.rssi!==0).length
-  // Use Kalman position for the grid marker (most accurate)
   const gridPos     = liveFiltPos || liveRawPos
+
+  // ── Sniffer inspector rows ────────────────────────────────────────────────
+  const snifferInspectorRows = (n) => [
+    ['Address',    n.addr],
+    ['RSSI',       `${n.rssi} dBm`],
+    ['TX Power',   n.tx_power != null ? `${n.tx_power} dBm` : '—'],
+    ['Adv Type',   `0x${(n.adv_type||0).toString(16).padStart(2,'0')} (${ADV_TYPE_STR[n.adv_type] || '?'})`],
+    ['Adv Props',  `0x${(n.adv_props||0).toString(16).padStart(4,'0')}`],
+    ['Primary PHY',   PHY_STR[n.primary_phy]   || n.primary_phy],
+    ['Secondary PHY', PHY_STR[n.secondary_phy] || n.secondary_phy],
+    ['Interval',   n.interval ? `${(n.interval * 1.25).toFixed(2)} ms` : 'none'],
+    n.has_name && n.name && ['Name', n.name],
+    n.has_flags  && ['Flags', `0x${(n.flags||0).toString(16).padStart(2,'0')}`],
+    n.has_manufacturer_data && ['Company ID', `0x${(n.manufacturer_company_id||0).toString(16).padStart(4,'0')}`],
+    n.has_manufacturer_data && n.manufacturer_data?.length > 0 &&
+      ['Mfr Data', n.manufacturer_data.map(b=>b.toString(16).padStart(2,'0')).join(' ')],
+    n.has_service_data && ['Svc Data Type', `0x${(n.service_data_type||0).toString(16).padStart(2,'0')}`],
+    n.has_service_data && n.service_data?.length > 0 &&
+      ['Svc Data', n.service_data.map(b=>b.toString(16).padStart(2,'0')).join(' ')],
+  ].filter(Boolean)
 
   return (
     <div style={s.root}>
@@ -263,7 +301,14 @@ export default function App() {
         <Pill>PKT <b style={s.val}>{pktCount}</b></Pill>
         <Pill>NODES <b style={s.val}>{Object.keys(nodes).length}</b></Pill>
         <Pill>ACTIVE <b style={{...s.val,color:activeCount>0?'#00e5a0':'#4a5568'}}>{activeCount}</b></Pill>
+        {snifferMode && <Pill>SNIFF <b style={{...s.val,color:'#f6c343'}}>{Object.keys(snifferNodes).length}</b></Pill>}
         <div style={{flex:1}}/>
+        <button
+          style={{...s.btnSm,...(snifferMode?{background:'#f6c343',color:'#000',borderColor:'#f6c343'}:{})}}
+          onClick={()=>{ toggleSniffer(); setActiveTab('sniffer') }}
+        >
+          {snifferMode ? '◉ Sniffer ON' : '◎ Sniffer'}
+        </button>
         <button style={{...s.btnSm,...(addMode?s.btnSmActive:{})}} onClick={()=>setAddMode(v=>!v)}>{addMode?'✕ Cancel':'+ Place'}</button>
         <button style={s.btnSm} onClick={fitView}>Fit</button>
         <button style={s.btnSm} onClick={viewAllNodes}>Query All</button>
@@ -277,14 +322,12 @@ export default function App() {
           <div style={{position:'relative',width:GRID_W,height:GRID_H}}>
             <canvas ref={canvasRef} style={{position:'absolute',inset:0}}/>
 
-            {/* RSSI rings */}
             {showRings && Object.values(nodes).map(node=>{
               const ld=liveData[node.name]; if(!ld||ld.distance<=0)return null
               const{gx,gy}=metersToGrid(node.x,node.y); const px=ld.distance*CELL
               return <div key={node.name+'_ring'} style={{position:'absolute',borderRadius:'50%',border:'1px dashed rgba(59,138,255,0.25)',width:px*2,height:px*2,left:gx-px,top:gy-px,pointerEvents:'none'}}/>
             })}
 
-            {/* Raw position marker (blue) */}
             {showPos && liveRawPos && (()=>{
               const{gx,gy}=metersToGrid(liveRawPos.x,liveRawPos.y)
               return (
@@ -297,7 +340,6 @@ export default function App() {
               )
             })()}
 
-            {/* Kalman position marker (orange, pulsing) */}
             {showPos && liveFiltPos && (()=>{
               const{gx,gy}=metersToGrid(liveFiltPos.x,liveFiltPos.y)
               return (
@@ -310,7 +352,6 @@ export default function App() {
               )
             })()}
 
-            {/* Nodes */}
             {Object.values(nodes).map(node=>{
               const ld=liveData[node.name]||{}
               const active=ld.rssi&&ld.rssi!==0
@@ -335,7 +376,7 @@ export default function App() {
           <div style={s.tabs}>
             {TABS.map(tab=>(
               <button key={tab} onClick={()=>setActiveTab(tab)} style={{...s.tab,...(activeTab===tab?s.tabActive:{})}}>
-                {tab==='nodes'?'◈ Nodes':tab==='position'?'⊕ Pos':tab==='config'?'⚙ Cfg':'▤ Log'}
+                {tab==='nodes'?'◈ Nodes':tab==='position'?'⊕ Pos':tab==='sniffer'?'⊙ Sniff':tab==='config'?'⚙ Cfg':'▤ Log'}
               </button>
             ))}
           </div>
@@ -403,8 +444,6 @@ export default function App() {
                   <div style={s.sectionLabel}>Trajectory</div>
                   <button onClick={clearTrajectory} style={{...s.btnSm,fontSize:9}}>Clear</button>
                 </div>
-
-                {/* Toggles */}
                 <div style={{display:'flex',gap:6,marginBottom:10}}>
                   <button onClick={()=>setShowRaw(v=>!v)} style={{...s.toggleBtn,borderColor:showRaw?'#3b8aff':'#252b35',color:showRaw?'#3b8aff':'#4a5568',background:showRaw?'rgba(59,138,255,0.08)':'transparent'}}>
                     <span style={{width:8,height:8,borderRadius:'50%',background:showRaw?'#3b8aff':'#4a5568',display:'inline-block',marginRight:5}}/>Raw (LS)
@@ -413,13 +452,9 @@ export default function App() {
                     <span style={{width:8,height:8,borderRadius:'50%',background:showFilt?'#00e5a0':'#4a5568',display:'inline-block',marginRight:5}}/>Kalman
                   </button>
                 </div>
-
-                {/* Trajectory canvas */}
                 <div style={{background:'#0c0e11',border:'1px solid #252b35',borderRadius:4,overflow:'hidden',marginBottom:12}}>
                   <canvas ref={trajCanvasRef} width={262} height={220} style={{display:'block',width:'100%'}}/>
                 </div>
-
-                {/* Position values — show both */}
                 <div style={s.sectionLabel}>Current position</div>
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
                   <div style={{background:'#0c0e11',border:'1px solid rgba(59,138,255,0.3)',borderRadius:4,padding:'8px',textAlign:'center'}}>
@@ -435,7 +470,6 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-
                 <hr style={s.divider}/>
                 <div style={s.sectionLabel}>Active nodes</div>
                 {Object.values(liveData).filter(n=>n.rssi&&n.rssi!==0).sort((a,b)=>b.rssi-a.rssi).map(n=>(
@@ -454,6 +488,107 @@ export default function App() {
               </>
             )}
 
+            {/* ── SNIFFER ── */}
+            {activeTab==='sniffer' && (
+              <>
+                {/* Header row */}
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+                  <div style={s.sectionLabel}>
+                    Sniffer&nbsp;
+                    <span style={{color: snifferMode ? '#f6c343' : '#4a5568'}}>
+                      {snifferMode ? '● ON' : '○ OFF'}
+                    </span>
+                  </div>
+                  <div style={{display:'flex',gap:6}}>
+                    <button
+                      onClick={toggleSniffer}
+                      style={{...s.btnSm,fontSize:9,...(snifferMode?{background:'#f6c343',color:'#000',borderColor:'#f6c343'}:{})}}
+                    >
+                      {snifferMode ? 'Turn OFF' : 'Turn ON'}
+                    </button>
+                    <button onClick={()=>{setSnifferNodes({});setSelectedSniffer(null)}} style={{...s.btnSm,fontSize:9}}>Clear</button>
+                  </div>
+                </div>
+
+                {/* Node list */}
+                <div style={{display:'flex',flexDirection:'column',gap:3,marginBottom:12}}>
+                  {Object.values(snifferNodes)
+                    .sort((a,b) => b.rssi - a.rssi)
+                    .map(node => {
+                      const label = node.has_name && node.name ? node.name : node.addr
+                      const isSelected = selectedSniffer === node.addr
+                      const age = Date.now() - (node.last_seen || 0)
+                      const fresh = age < 3000
+                      return (
+                        <div
+                          key={node.addr}
+                          onClick={() => setSelectedSniffer(isSelected ? null : node.addr)}
+                          style={{
+                            background: isSelected ? 'rgba(59,138,255,.1)' : '#0c0e11',
+                            border: `1px solid ${isSelected ? '#3b8aff' : fresh ? 'rgba(246,195,67,0.3)' : '#252b35'}`,
+                            borderRadius: 3, padding:'6px 8px', cursor:'pointer',
+                            transition:'border-color .3s',
+                          }}
+                        >
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                            <span style={{fontFamily:'monospace',fontSize:10,color: fresh ? '#c8d4e0' : '#4a5568',maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                              {label}
+                            </span>
+                            <div style={{display:'flex',gap:8,alignItems:'center',flexShrink:0}}>
+                              <RssiBar rssi={node.rssi}/>
+                              <span style={{fontFamily:'monospace',fontSize:9,color:'#3b8aff'}}>{node.rssi}</span>
+                            </div>
+                          </div>
+                          {node.has_name && node.name && (
+                            <div style={{fontFamily:'monospace',fontSize:8,color:'#4a5568',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                              {node.addr}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })
+                  }
+                  {Object.keys(snifferNodes).length === 0 && (
+                    <div style={{...s.emptyState, height:80}}>
+                      {snifferMode ? 'Scanning for nodes…' : 'Enable sniffer mode to scan'}
+                    </div>
+                  )}
+                </div>
+
+                {/* Inspector */}
+                {selectedSniffer && snifferNodes[selectedSniffer] && (() => {
+                  const n = snifferNodes[selectedSniffer]
+                  const rows = snifferInspectorRows(n)
+                  return (
+                    <div style={{background:'#0c0e11',border:'1px solid #252b35',borderRadius:4,padding:10}}>
+                      <div style={{...s.sectionLabel,marginBottom:8}}>Inspector</div>
+                      {rows.map(([label, value]) => (
+                        <div key={label} style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',
+                          padding:'3px 0',borderBottom:'1px solid #1a1e24',gap:8}}>
+                          <span style={{fontFamily:'monospace',fontSize:9,color:'#4a5568',flexShrink:0}}>{label}</span>
+                          <span style={{fontFamily:'monospace',fontSize:9,color:'#c8d4e0',
+                            textAlign:'right',wordBreak:'break-all'}}>{value}</span>
+                        </div>
+                      ))}
+                      {n.raw?.length > 0 && (
+                        <div style={{marginTop:8}}>
+                          <div style={{fontFamily:'monospace',fontSize:9,color:'#4a5568',marginBottom:4}}>
+                            Raw payload ({n.raw.length} B)
+                          </div>
+                          <div style={{fontFamily:'monospace',fontSize:8,color:'#4a5568',
+                            lineHeight:1.8,wordBreak:'break-all'}}>
+                            {n.raw.map((b,i)=>(
+                              <span key={i} style={{marginRight:4}}>{b.toString(16).padStart(2,'0')}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
+              </>
+            )}
+
             {/* ── CONFIG ── */}
             {activeTab==='config' && (
               <>
@@ -464,10 +599,12 @@ export default function App() {
                 <button onClick={saveConfig} disabled={configSaving} style={s.btnPrimary}>{configSaving?'Saving…':'Save config'}</button>
                 <hr style={s.divider}/>
                 <div style={s.sectionLabel}>Connection</div>
-                <StatRow label="WS status"   value={wsStatus}                 color={wsStatus==='Connected'?'#00e5a0':'#ff6b35'}/>
-                <StatRow label="Packets rx"  value={pktCount}                 color="#c8d4e0"/>
+                <StatRow label="WS status"   value={wsStatus}                  color={wsStatus==='Connected'?'#00e5a0':'#ff6b35'}/>
+                <StatRow label="Packets rx"  value={pktCount}                  color="#c8d4e0"/>
                 <StatRow label="Nodes known" value={Object.keys(nodes).length} color="#c8d4e0"/>
-                <StatRow label="Active"      value={activeCount}              color={activeCount>0?'#00e5a0':'#4a5568'}/>
+                <StatRow label="Active"      value={activeCount}               color={activeCount>0?'#00e5a0':'#4a5568'}/>
+                <StatRow label="Sniffer"     value={snifferMode?'ON':'OFF'}    color={snifferMode?'#f6c343':'#4a5568'}/>
+                <StatRow label="Sniff nodes" value={Object.keys(snifferNodes).length} color="#c8d4e0"/>
               </>
             )}
 
@@ -524,7 +661,7 @@ const s={
   gridWrap:{flex:1,overflow:'auto',position:'relative'},
   panel:{width:290,flexShrink:0,background:'#13161b',borderLeft:'1px solid #252b35',display:'flex',flexDirection:'column',overflow:'hidden'},
   tabs:{display:'flex',borderBottom:'1px solid #252b35',flexShrink:0},
-  tab:{flex:1,background:'transparent',border:'none',borderBottom:'2px solid transparent',color:'#4a5568',fontFamily:'monospace',fontSize:9,padding:'8px 4px',cursor:'pointer',letterSpacing:'.05em'},
+  tab:{flex:1,background:'transparent',border:'none',borderBottom:'2px solid transparent',color:'#4a5568',fontFamily:'monospace',fontSize:9,padding:'8px 2px',cursor:'pointer',letterSpacing:'.03em'},
   tabActive:{color:'#00e5a0',borderBottomColor:'#00e5a0'},
   panelBody:{flex:1,overflowY:'auto',padding:14},
   emptyState:{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',gap:8,color:'#4a5568',fontFamily:'monospace',fontSize:11,textAlign:'center'},
