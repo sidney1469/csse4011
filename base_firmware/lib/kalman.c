@@ -91,6 +91,13 @@ void kalman_predict(float dt)
     P[2][0] += Q * dt3 / 2.0f;
     P[1][3] += Q * dt3 / 2.0f;
     P[3][1] += Q * dt3 / 2.0f;
+
+    // Force symmetry in case of floating point difference
+    for (int i = 0; i < 4; i++) {
+        for (int j = i + 1; j < 4; j++) {
+            P[i][j] = P[j][i] = 0.5f * (P[i][j] + P[j][i]);
+        }
+    }
 }
 
 /*
@@ -179,6 +186,13 @@ void kalman_update(float x_meas, float y_meas)
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
             P[i][j] = IKHPIKH_T[i][j] + KRK_T[i][j];
+        }
+    }
+
+    // Force symmetry in case of floating point difference
+    for (int i = 0; i < 4; i++) {
+        for (int j = i + 1; j < 4; j++) {
+            P[i][j] = P[j][i] = 0.5f * (P[i][j] + P[j][i]);
         }
     }
 }
