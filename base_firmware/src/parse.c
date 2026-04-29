@@ -114,10 +114,17 @@ void parse_thread(void *a, void *b, void *c)
         } else {
             printk("Localisation successful. Estimated position using %d nodes\n", beacons_used);
 
-            if (raw_pos[0] > 10.0f || raw_pos[0] < -2.0f || raw_pos[1] > 6.0f ||
-                raw_pos[1] < -2.0f) {
-                printk("Rejecting outlier position: %.2f, %.2f\n", raw_pos[0], raw_pos[1]);
-                continue;
+            if (raw_pos[0] > 10.0f) {
+                raw_pos[0] = 10.0f;
+            }
+            if (raw_pos[0] < -2.0f) {
+                raw_pos[0] = -2.0f;
+            }
+            if (raw_pos[1] > 6.0f) {
+                raw_pos[1] = 6.0f;
+            }
+            if (raw_pos[1] < -2.0f) {
+                raw_pos[1] = -2.0f;
             }
 
             if (filter_initialised) {
