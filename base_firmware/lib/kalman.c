@@ -121,7 +121,7 @@ void kalman_update(float x_meas, float y_meas)
 
     transpose_matrix((float *)H, (float *)H_T, 2, 4);
     multiply_matrix((float *)H, (float *)P, (float *)HP, 2, 4, 4);
-    multiply_matrix((float *)HP, (float *)H_T, (float *)HPH_T, 2, 4, 4);
+    multiply_matrix((float *)HP, (float *)H_T, (float *)HPH_T, 2, 4, 2);
 
     HPH_T[0][0] += R;
     HPH_T[1][1] += R;
