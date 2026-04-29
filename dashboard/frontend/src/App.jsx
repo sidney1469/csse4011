@@ -1,31 +1,42 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import axios from 'axios'
 
+/* Static application configuration */
 const NODE_NAMES = ['4011-A','4011-B','4011-C','4011-D','4011-E','4011-F',
                     '4011-G','4011-H','4011-I','4011-J','4011-K','4011-L','4011-M']
 const API    = 'http://localhost:8000'
 const GRID_W = 1200
 const GRID_H = 900
-const CELL   = 60
+const CELL   = 30          // 30 px = 0.5 m  →  1 m = 60 px
+const CELL_M = 0.5         // metres per grid cell
 const TABS   = ['nodes','position','metrics','sniffer','config','log']
 const TRAJ_HISTORY = 300
 
+/* BLE display mappings used by the sniffer inspector */
 const PHY_STR = { 0:'None', 1:'LE 1M', 2:'LE 2M', 3:'LE Coded' }
 const ADV_TYPE_STR = {
   0:'ADV_IND', 1:'ADV_DIRECT_IND', 2:'ADV_SCAN_IND',
   3:'ADV_NONCONN_IND', 4:'SCAN_RSP', 5:'EXT_ADV'
 }
 
+/* Converts real-world metre coordinates into grid pixel coordinates */
 function metersToGrid(x, y) {
-  return { gx: GRID_W / 2 + x * CELL, gy: GRID_H / 2 - y * CELL }
+  return { gx: GRID_W / 2 + x * (CELL / CELL_M), gy: GRID_H / 2 - y * (CELL / CELL_M) }
 }
+
+/* Converts grid pixel coordinates back into metre coordinates */
 function gridToMeters(gx, gy) {
+  const pxPerM = CELL / CELL_M
   return {
-    x: +((gx - GRID_W / 2) / CELL).toFixed(2),
-    y: +((GRID_H / 2 - gy) / CELL).toFixed(2),
+    x: +((gx - GRID_W / 2) / pxPerM).toFixed(2),
+    y: +((GRID_H / 2 - gy) / pxPerM).toFixed(2),
   }
 }
 
+/*
+ * Modal used to inspect a scanned BLE device in sniffer mode.
+ * Shows decoded BLE metadata and the raw payload where available.
+ */
 function SnifferModal({ node, onClose, rows }) {
   if (!node) return null
   return (
@@ -63,9 +74,11 @@ function SnifferModal({ node, onClose, rows }) {
   )
 }
 
+/* Blank form template used when creating or editing beacon nodes */
 const EMPTY_FORM = { name:'', mac:'', major:0, minor:0, x:0, y:0, z:0, left:'', right:'' }
 
 export default function App() {
+  /* Main application state */
   const [nodes,           setNodes]           = useState({})
   const [liveData,        setLiveData]        = useState({})
   const [liveRawPos,      setLiveRawPos]      = useState(null)
@@ -91,12 +104,16 @@ export default function App() {
   const [snifferNodes,    setSnifferNodes]    = useState({})
   const [selectedSniffer, setSelectedSniffer] = useState(null)
 
-  // Metrics state
+  /* Metrics state */
   const [totalDistance,   setTotalDistance]   = useState(0)
   const [avgVelocity,     setAvgVelocity]     = useState(0)
   const [velSamples,      setVelSamples]      = useState([])
   const lastFiltPosRef = useRef(null)
 
+  /*
+   * Refs used for trajectory drawing.
+   * They avoid re-rendering the whole UI on every animation frame.
+   */
   const rawHistRef  = useRef([])
   const filtHistRef = useRef([])
   const showRawRef  = useRef(true)
@@ -104,43 +121,68 @@ export default function App() {
   useEffect(() => { showRawRef.current  = showRaw  }, [showRaw])
   useEffect(() => { showFiltRef.current = showFilt }, [showFilt])
 
+  /* DOM and connection refs */
   const canvasRef     = useRef(null)
   const trajCanvasRef = useRef(null)
   const gridWrapRef   = useRef(null)
   const wsRef         = useRef(null)
   const logRef        = useRef(null)
 
+  /* Adds a timestamped event to the UI log */
   const addLog = useCallback((msg, type = 'info') => {
     const ts = new Date().toISOString().slice(11, 23)
     setLog(l => [...l.slice(-299), { ts, msg, type }])
   }, [])
 
   // ── Grid canvas ───────────────────────────────────────────────────────────
+
+  /*
+   * Draws the static background grid once when the component mounts.
+   * Grid lines are drawn every 0.5 m (CELL px), with a brighter line every 1 m (2 cells).
+   * Dynamic elements such as nodes, rings, and positions are rendered separately.
+   */
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     canvas.width = GRID_W; canvas.height = GRID_H
     const ctx = canvas.getContext('2d')
     ctx.clearRect(0, 0, GRID_W, GRID_H)
-    ctx.strokeStyle = 'rgba(37,43,53,0.7)'; ctx.lineWidth = 0.5
+
+    // Minor grid lines every 0.5 m
+    ctx.strokeStyle = 'rgba(37,43,53,0.5)'; ctx.lineWidth = 0.5
     for (let x = 0; x <= GRID_W; x += CELL) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,GRID_H); ctx.stroke() }
     for (let y = 0; y <= GRID_H; y += CELL) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(GRID_W,y); ctx.stroke() }
+
+    // Major grid lines every 1 m (every 2 cells)
+    ctx.strokeStyle = 'rgba(55,65,80,0.9)'; ctx.lineWidth = 0.8
+    for (let x = 0; x <= GRID_W; x += CELL * 2) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,GRID_H); ctx.stroke() }
+    for (let y = 0; y <= GRID_H; y += CELL * 2) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(GRID_W,y); ctx.stroke() }
+
+    // Axes
     ctx.strokeStyle = 'rgba(55,65,80,1)'; ctx.lineWidth = 1
     ctx.beginPath(); ctx.moveTo(GRID_W/2,0); ctx.lineTo(GRID_W/2,GRID_H); ctx.stroke()
     ctx.beginPath(); ctx.moveTo(0,GRID_H/2); ctx.lineTo(GRID_W,GRID_H/2); ctx.stroke()
-    // Grid labels (metres)
-    ctx.fillStyle = 'rgba(74,85,104,0.6)'; ctx.font = '10px monospace'
+
+    // Grid labels every 0.5 m
+    ctx.fillStyle = 'rgba(74,85,104,0.6)'; ctx.font = '9px monospace'
     for (let x = 0; x <= GRID_W; x += CELL) {
-      const m = ((x - GRID_W/2) / CELL).toFixed(0)
-      ctx.fillText(m+'m', x+2, GRID_H/2-4)
+      const m = ((x - GRID_W / 2) / (CELL / CELL_M))
+      const label = Number.isInteger(m) ? m + 'm' : m.toFixed(1)
+      ctx.fillText(label, x + 2, GRID_H / 2 - 4)
     }
     for (let y = 0; y <= GRID_H; y += CELL) {
-      const m = ((GRID_H/2 - y) / CELL).toFixed(0)
-      ctx.fillText(m+'m', GRID_W/2+4, y+10)
+      const m = ((GRID_H / 2 - y) / (CELL / CELL_M))
+      const label = Number.isInteger(m) ? m + 'm' : m.toFixed(1)
+      ctx.fillText(label, GRID_W / 2 + 4, y + 10)
     }
   }, [])
 
   // ── Trajectory RAF loop ───────────────────────────────────────────────────
+
+  /*
+   * Continuously redraws the trajectory canvas.
+   * Snap grid lines to 0.5 m increments in the auto-scaled view.
+   */
   useEffect(() => {
     let raf
     const draw = () => {
@@ -155,15 +197,35 @@ export default function App() {
       if (pts.length < 2) { raf = requestAnimationFrame(draw); return }
       let minX=pts[0].x,maxX=pts[0].x,minY=pts[0].y,maxY=pts[0].y
       for (const p of pts) { if(p.x<minX)minX=p.x; if(p.x>maxX)maxX=p.x; if(p.y<minY)minY=p.y; if(p.y>maxY)maxY=p.y }
-      const pad=1; minX-=pad; maxX+=pad; minY-=pad; maxY+=pad
+      const pad=0.5; minX-=pad; maxX+=pad; minY-=pad; maxY+=pad
       const rX=maxX-minX||1, rY=maxY-minY||1
       const tc=(x,y)=>({ cx:((x-minX)/rX)*(W-40)+20, cy:H-(((y-minY)/rY)*(H-40)+20) })
+
+      // Grid lines snapped to 0.5 m
       ctx.strokeStyle='rgba(37,43,53,0.6)'; ctx.lineWidth=0.5
-      for(let gx=Math.ceil(minX);gx<=Math.floor(maxX);gx++){const{cx}=tc(gx,minY);ctx.beginPath();ctx.moveTo(cx,0);ctx.lineTo(cx,H);ctx.stroke()}
-      for(let gy=Math.ceil(minY);gy<=Math.floor(maxY);gy++){const{cy}=tc(minX,gy);ctx.beginPath();ctx.moveTo(0,cy);ctx.lineTo(W,cy);ctx.stroke()}
+      const gridStep = CELL_M // 0.5 m
+      const startGX = Math.ceil(minX / gridStep) * gridStep
+      const startGY = Math.ceil(minY / gridStep) * gridStep
+      for (let gx = startGX; gx <= maxX; gx = +(gx + gridStep).toFixed(4)) {
+        const {cx} = tc(gx, minY); ctx.beginPath(); ctx.moveTo(cx,0); ctx.lineTo(cx,H); ctx.stroke()
+      }
+      for (let gy = startGY; gy <= maxY; gy = +(gy + gridStep).toFixed(4)) {
+        const {cy} = tc(minX, gy); ctx.beginPath(); ctx.moveTo(0,cy); ctx.lineTo(W,cy); ctx.stroke()
+      }
+
+      // Labels for whole-metre lines only to avoid clutter
       ctx.fillStyle='rgba(74,85,104,0.9)'; ctx.font='9px monospace'
-      for(let gx=Math.ceil(minX);gx<=Math.floor(maxX);gx++){const{cx}=tc(gx,minY);ctx.fillText(gx+'m',cx+2,H-4)}
-      for(let gy=Math.ceil(minY);gy<=Math.floor(maxY);gy++){const{cy}=tc(minX,gy);ctx.fillText(gy+'m',2,cy-3)}
+      for (let gx = startGX; gx <= maxX; gx = +(gx + gridStep).toFixed(4)) {
+        if (Math.abs(gx % 1) < 0.01) { // whole metre
+          const {cx} = tc(gx, minY); ctx.fillText(gx.toFixed(0)+'m', cx+2, H-4)
+        }
+      }
+      for (let gy = startGY; gy <= maxY; gy = +(gy + gridStep).toFixed(4)) {
+        if (Math.abs(gy % 1) < 0.01) {
+          const {cy} = tc(minX, gy); ctx.fillText(gy.toFixed(0)+'m', 2, cy-3)
+        }
+      }
+
       const drawPath=(pts,color,alpha,lw)=>{
         if(pts.length<2)return
         ctx.save(); ctx.strokeStyle=color; ctx.globalAlpha=alpha; ctx.lineWidth=lw; ctx.lineJoin='round'; ctx.lineCap='round'
@@ -182,20 +244,28 @@ export default function App() {
     return () => cancelAnimationFrame(raf)
   }, [])
 
+  /* Centres the scrollable grid around the origin when the page first loads */
   useEffect(() => {
     const w = gridWrapRef.current; if(!w) return
     w.scrollLeft = (GRID_W - w.clientWidth)  / 2
     w.scrollTop  = (GRID_H - w.clientHeight) / 2
   }, [])
 
+  /* Loads initial configuration and sniffer status from the backend */
   useEffect(() => {
     axios.get(`${API}/config`).then(r => setConfig({ meas_power:r.data.meas_power, path_loss_exp:r.data.path_loss_exp })).catch(()=>{})
     axios.get(`${API}/sniffer`).then(r => setSnifferMode(r.data.sniffer)).catch(()=>{})
   }, [])
 
+  /* Keeps the log view scrolled to the latest event */
   useEffect(() => { if(logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight }, [log])
 
   // ── WebSocket ─────────────────────────────────────────────────────────────
+
+  /*
+   * Opens the live WebSocket connection to the backend.
+   * Handles beacon lists, RSSI/localisation packets, and sniffer packets.
+   */
   useEffect(() => {
     const connect = () => {
       const ws = new WebSocket('ws://localhost:8000/ws')
@@ -277,6 +347,7 @@ export default function App() {
     return () => { clearTimeout(t); wsRef.current?.close() }
   }, [addLog])
 
+  /* Populates the edit form whenever a node is selected */
   useEffect(() => {
     if (!selectedId || !nodes[selectedId]) return
     const n = nodes[selectedId]
@@ -284,13 +355,20 @@ export default function App() {
     setToast({ type:'', msg:'' })
   }, [selectedId, nodes])
 
+  /*
+   * Places a new node on the grid when add mode is active.
+   * Click location is snapped to the nearest 0.5 m grid intersection.
+   */
   const handleGridClick = useCallback((e) => {
     if (!addMode) return
     const wrap = gridWrapRef.current
     const rect = wrap.getBoundingClientRect()
     const gx = e.clientX - rect.left + wrap.scrollLeft
     const gy = e.clientY - rect.top  + wrap.scrollTop
-    const { x, y } = gridToMeters(gx, gy)
+    const raw = gridToMeters(gx, gy)
+    // Snap to nearest 0.5 m
+    const x = Math.round(raw.x / CELL_M) * CELL_M
+    const y = Math.round(raw.y / CELL_M) * CELL_M
     const used = new Set(Object.keys(nodes))
     const free = NODE_NAMES.find(n => !used.has(n))
     if (!free) { addLog('All 13 nodes placed','warn'); return }
@@ -299,6 +377,7 @@ export default function App() {
     setAddMode(false); setSelectedId(free); setActiveTab('nodes')
   }, [addMode, nodes, addLog])
 
+  /* Form and backend action handlers */
   const handleFormChange = (e) => { const{name,value}=e.target; setForm(f=>({...f,[name]:value})) }
 
   const removeNode = async () => {
@@ -337,14 +416,18 @@ export default function App() {
     try{await axios.post(`${API}/config`,config);addLog('Config saved','ok')}catch(err){addLog(`Config save failed: ${err.message}`,'err')}
     finally{setConfigSaving(false)}
   }
+
+  /* Utility actions for resetting views and trajectory data */
   const fitView         = () => { const w=gridWrapRef.current;if(!w)return;w.scrollLeft=(GRID_W-w.clientWidth)/2;w.scrollTop=(GRID_H-w.clientHeight)/2 }
   const clearTrajectory = () => { rawHistRef.current=[]; filtHistRef.current=[]; lastFiltPosRef.current=null; setTotalDistance(0); setAvgVelocity(0); setVelSamples([]) }
 
+  /* Derived display values */
   const live        = selectedId ? (liveData[selectedId]||{}) : {}
   const activeCount = Object.values(liveData).filter(n=>n.rssi&&n.rssi!==0).length
   const liveSpeed   = liveVelocity ? Math.sqrt(liveVelocity.x**2 + liveVelocity.y**2) : null
   const uptimeSec   = liveTimestamp ? (liveTimestamp / 1000).toFixed(1) : null
 
+  /* Builds the rows shown in the sniffer inspector modal */
   const snifferInspectorRows = (n) => {
     const hexStr = (val) => Array.isArray(val) ? val.map(b=>b.toString(16).padStart(2,'0')).join(' ') : (val||'—')
     return [
@@ -395,7 +478,8 @@ export default function App() {
 
             {showRings && Object.values(nodes).map(node=>{
               const ld=liveData[node.name]; if(!ld||ld.distance<=0)return null
-              const{gx,gy}=metersToGrid(node.x,node.y); const px=ld.distance*CELL
+              const{gx,gy}=metersToGrid(node.x,node.y)
+              const px = ld.distance * (CELL / CELL_M)   // convert metres → px
               return <div key={node.name+'_ring'} style={{position:'absolute',borderRadius:'50%',border:'1px dashed rgba(59,138,255,0.25)',width:px*2,height:px*2,left:gx-px,top:gy-px,pointerEvents:'none'}}/>
             })}
 
@@ -500,10 +584,10 @@ export default function App() {
                     <Field label="Minor"><input name="minor" type="number" min={0} max={65535} value={form.minor} onChange={handleFormChange} style={s.input}/></Field>
                   </div>
                   <div style={s.row2}>
-                    <Field label="X (m)"><input name="x" type="number" step={0.1} value={form.x} onChange={handleFormChange} style={s.input}/></Field>
-                    <Field label="Y (m)"><input name="y" type="number" step={0.1} value={form.y} onChange={handleFormChange} style={s.input}/></Field>
+                    <Field label="X (m)"><input name="x" type="number" step={0.5} value={form.x} onChange={handleFormChange} style={s.input}/></Field>
+                    <Field label="Y (m)"><input name="y" type="number" step={0.5} value={form.y} onChange={handleFormChange} style={s.input}/></Field>
                   </div>
-                  <Field label="Z (m)"><input name="z" type="number" step={0.1} value={form.z} onChange={handleFormChange} style={s.input}/></Field>
+                  <Field label="Z (m)"><input name="z" type="number" step={0.5} value={form.z} onChange={handleFormChange} style={s.input}/></Field>
                   <div style={s.row2}>
                     <Field label="Left">
                       <select name="left" value={form.left} onChange={handleFormChange} style={s.input}>
@@ -738,6 +822,7 @@ export default function App() {
   )
 }
 
+/* Small reusable UI components */
 function MetricCard({label,value,color}){
   return(
     <div style={{background:'#0c0e11',border:`1px solid ${color}22`,borderRadius:4,padding:'10px 12px'}}>
@@ -746,12 +831,18 @@ function MetricCard({label,value,color}){
     </div>
   )
 }
+
 function Pill({children}){return<div style={{display:'inline-flex',alignItems:'center',gap:5,background:'#1a1e24',border:'1px solid #252b35',borderRadius:3,padding:'2px 8px',fontFamily:'monospace',fontSize:10,color:'#4a5568'}}>{children}</div>}
+
 function Dot({status}){const color=status==='Connected'?'#00e5a0':status==='Error'?'#ff6b35':'#4a5568';return<div style={{width:6,height:6,borderRadius:'50%',background:color,flexShrink:0}}/>}
+
 function Field({label,children}){return<div style={{display:'flex',flexDirection:'column',gap:3,marginBottom:9}}><span style={{fontFamily:'monospace',fontSize:9,letterSpacing:'.1em',textTransform:'uppercase',color:'#4a5568'}}>{label}</span>{children}</div>}
+
 function StatRow({label,value,color}){return<div style={{display:'flex',justifyContent:'space-between',padding:'4px 0',borderBottom:'1px solid #252b35'}}><span style={{fontFamily:'monospace',fontSize:10,color:'#4a5568'}}>{label}</span><span style={{fontFamily:'monospace',fontSize:10,color:color||'#c8d4e0'}}>{value}</span></div>}
+
 function RssiBar({rssi}){const pct=Math.max(0,Math.min(100,((rssi+90)/50)*100));const color=pct>60?'#00e5a0':pct>30?'#f6c343':'#ff6b35';return<div style={{width:40,height:4,background:'#252b35',borderRadius:2,overflow:'hidden'}}><div style={{width:`${pct}%`,height:'100%',background:color,borderRadius:2,transition:'width .3s'}}/></div>}
 
+/* Centralised inline style object for the dashboard */
 const s={
   root:{display:'flex',flexDirection:'column',height:'100vh',background:'#0c0e11',color:'#c8d4e0',fontFamily:'sans-serif',fontSize:13,overflow:'hidden'},
   topbar:{background:'#13161b',borderBottom:'1px solid #252b35',padding:'8px 16px',display:'flex',alignItems:'center',gap:8,flexShrink:0,flexWrap:'wrap'},
