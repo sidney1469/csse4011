@@ -84,7 +84,14 @@ void parse_thread(void *a, void *b, void *c)
         k_msgq_get(&bt_data_msgq, &data, K_FOREVER);
 
         curr_time_ms = k_uptime_get();
+
         dt = (curr_time_ms - last_time_ms) / 1000.0f;
+
+        // Clamp in the case that msgq waiting has taken a long time
+        if (dt > 0.5f) {
+            dt = 0.5f;
+        }
+
         last_time_ms = curr_time_ms;
 
         /* Load the current beacon coordinates configured through the shell */
@@ -106,6 +113,12 @@ void parse_thread(void *a, void *b, void *c)
             continue;
         } else {
             printk("Localisation successful. Estimated position using %d nodes\n", beacons_used);
+
+            if (raw_pos[0] > 10.0f || raw_pos[0] < -2.0f || raw_pos[1] > 6.0f ||
+                raw_pos[1] < -2.0f) {
+                printk("Rejecting outlier position: %.2f, %.2f\n", raw_pos[0], raw_pos[1]);
+                continue;
+            }
 
             if (filter_initialised) {
                 kalman_predict(dt);
