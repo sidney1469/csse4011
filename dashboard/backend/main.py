@@ -15,7 +15,7 @@ NODE_NAMES = ['4011-A','4011-B','4011-C','4011-D','4011-E','4011-F',
               '4011-G','4011-H','4011-I','4011-J','4011-K','4011-L','4011-M']
 
 MEAS_POWER = -56
-PATH_LOSS_EXP = 2.5
+PATH_LOSS_EXP = 3.0
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
